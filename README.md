@@ -1,450 +1,930 @@
-# PayNode Protocol: Decentralized Payment Gateway Contracts
+# PayNode Smart Contract Protocol
 
 ## Overview
-This project comprises the core smart contracts for the PayNode Protocol, a non-custodial payment aggregation system built on Solidity and utilizing the Foundry development framework. It facilitates parallel settlement and includes a provider intent registry, aiming to streamline decentralized payment processes.
+PayNode is a non-custodial payment aggregation protocol that connects users with multiple liquidity providers for fast, efficient settlements. Instead of routing orders to a single provider (bottleneck), PayNode sends simultaneous settlement proposals to multiple providers in parallel—the first to accept executes the order.
+
+
+Core Innovation: Providers pre-register their available capacity (intent), eliminating stale pricing and enabling intelligent provider selection. The system automatically ranks providers by success rate, speed, uptime, and fees, then races them for each order.
+
+
+System Architecture
+
+┌─────────────────────────────────────────────────────────┐
+│                    AccessManager                         │
+│  • Admin role control                                    │
+│  • Pause/Unpause permissions                            │
+│  • Blacklist management                                 │
+│  • Role-based access control (RBAC)                     │
+└─────────────────────────────────────────────────────────┘
+         ↓
+┌─────────────────────────────────────────────────────────┐
+│                  TimelockAdmin                          │
+│  • Upgrade scheduling (48h delay)                       │
+│  • Proposal queuing                                     │
+│  • Execution after timelock                            │
+│  • Cancel malicious upgrades                           │
+└─────────────────────────────────────────────────────────┘
+         ↓
+┌─────────────────────────────────────────────────────────┐
+│            PayNodeGatewaySettings                       │
+│  • Configuration parameters                             │
+│  • Token whitelist                                      │
+│  • Fee settings                                         │
+│  • Tier limits (SMALL/MEDIUM/LARGE)                    │
+└─────────────────────────────────────────────────────────┘
+         ↓
+┌─────────────────────────────────────────────────────────┐
+│             PayNodeGateway (Proxy)                       │
+│  • Order creation & management                          │
+│  • Provider intent registry                             │
+│  • Settlement proposals (parallel)                      │
+│  • Settlement execution                                │
+│  • Refund handling                                      │
+│  • Reputation tracking                                 │
+└─────────────────────────────────────────────────────────┘
 
 ## Features
-- **Non-Custodial Payments**: Users retain control of funds until settlement, enhancing security and trust.
-- **Provider Intent Registry**: Allows payment providers to register their available capacity, currencies, and fee structures.
-- **Order Management**: Supports creation, tracking, and tiering of payment orders based on amount.
-- **Settlement Proposals**: Aggregators can propose settlements to providers, who can then accept or reject.
-- **Reputation System**: Tracks provider performance, including successful orders, failures, and no-shows.
-- **Access Control**: Role-based access for `Owner`, `Aggregator`, and `Provider` roles.
-- **Pausable Operations**: Core contract operations can be paused by the owner for emergency situations.
-- **Reentrancy Protection**: Guards against reentrancy attacks on critical functions.
-- **ERC-20 Integration**: Handles transfers of supported ERC-20 tokens for orders and settlements.
-- **Upgradeability**: Built with OpenZeppelin's upgradeable patterns, allowing for future contract enhancements.
+-   **Role-Based Access Control (RBAC)**: Centralized permission management via `PayNodeAccessManager` with distinct roles for administrators, operators, and platform services.
+-   **Secure Upgradeability**: Utilizes UUPS proxy patterns and a `PayNodeAdmin` contract with timelock mechanisms (2-day delay) for controlled and transparent contract upgrades.
+-   **Decentralized Payment Gateway**: `PGateway` facilitates non-custodial order creation, parallel settlement proposals from multiple providers, and fee distribution.
+-   **Provider Intent Registry**: Providers can register and update their intent, specifying available liquidity, fee ranges, and commitment windows for order fulfillment.
+-   **Tier-Based Order Processing**: Orders are categorized into tiers (SMALL, MEDIUM, LARGE) based on amount, enabling optimized routing strategies for aggregators.
+-   **Reputation System**: Tracks provider performance metrics such as successful orders, failed orders, and no-show counts to inform selection.
+-   **Emergency Controls**: Includes `Pausable` functionality and a system-wide lock mechanism for immediate response to critical security events.
+-   **Chainlink Automation Integration**: `PayNodeAdmin` supports automated execution of scheduled upgrades via Chainlink Keepers, ensuring reliability and reducing manual intervention.
+-   **ERC20 Token Support**: The `PGateway` handles ERC20 token transfers for order amounts and fees.
+-   **Blacklisting**: Mechanism to flag and restrict malicious or non-compliant providers.
 
 ## Getting Started
 
-To get a local copy of the project up and running, follow these steps.
-
 ### Installation
-This project uses [Foundry](https://getfoundry.sh/) for its development environment.
+This project uses [Foundry](https://getfoundry.sh/) for smart contract development, testing, and deployment.
 
 1.  **Clone the Repository**:
     ```bash
-    git clone https://github.com/your-username/paynode-contract.git
+    git clone https://github.com/olujimiAdebakin/paynode-contract.git
     cd paynode-contract
     ```
 
 2.  **Install Foundry**:
-    If you don't have Foundry installed, you can install it using `foundryup`:
+    If you do not have Foundry installed, follow the instructions on the [Foundry Book](https://book.getfoundry.sh/getting-started/installation).
     ```bash
-    curl -L https://foundry.sh | bash
+    curl -L https://foundry.paradigm.xyz | bash
     foundryup
     ```
 
 3.  **Install Dependencies**:
-    The project relies on OpenZeppelin contracts and `forge-std`. These are managed as Git submodules and Foundry dependencies.
+    Fetch the necessary OpenZeppelin and Chainlink libraries.
     ```bash
-    git submodule update --init --recursive
     forge install
     ```
 
-4.  **Build Contracts**:
-    Compile the smart contracts:
+4.  **Compile Contracts**:
+    Compile the smart contracts to ensure everything is set up correctly.
     ```bash
     forge build
     ```
 
-5.  **Run Tests (Optional)**:
-    Execute the test suite to ensure everything is functioning correctly:
+5.  **Run Tests (Optional but Recommended)**:
+    Execute the test suite to verify contract functionality.
     ```bash
     forge test
     ```
 
 ### Environment Variables
-This project primarily uses Foundry's configuration. For deployment or specific network interactions, the following environment variables are typically required:
+The following parameters are required during contract deployment and initialization. These are not traditional environment variables but rather critical configuration values passed during the initial setup of the smart contracts.
 
--   `RPC_URL`: The URL of the Ethereum-compatible blockchain node you wish to interact with (e.g., `https://mainnet.infura.io/v3/YOUR_PROJECT_ID`).
-    *Example*: `RPC_URL=https://eth-sepolia.g.alchemy.com/v2/YOUR_ALCHEMY_KEY`
--   `PRIVATE_KEY`: The private key of the account used for deploying or sending transactions. **Handle with extreme care.**
-    *Example*: `PRIVATE_KEY=0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890`
--   `ETHERSCAN_API_KEY`: API key for block explorers like Etherscan for contract verification.
-    *Example*: `ETHERSCAN_API_KEY=YOUR_ETHERSCAN_API_KEY`
+#### PayNodeAccessManager Initialization
+*   `_pasarAdmin`: Address designated as the initial `ADMIN_ROLE` holder, typically the deployed `PayNodeAdmin` contract.
+    *   Example: `0xAdminContractAddress`
+*   `_superAdmin`: Address designated as the initial `DEFAULT_ADMIN_ROLE` holder, possessing the highest authority.
+    *   Example: `0xSuperAdminWalletAddress`
+*   `operators`: An array of addresses to be granted the `OPERATOR_ROLE` for day-to-day operations like blacklist management.
+    *   Example: `["0xOperator1Address", "0xOperator2Address"]`
 
-These variables are usually set in a `.env` file (which should be in `.gitignore`) and loaded into your shell session.
+#### PayNodeAdmin Constructor
+*   `proposers`: An array of addresses authorized to propose timelocked operations (e.g., scheduled upgrades).
+    *   Example: `["0xProposer1Address"]`
+*   `executors`: An array of addresses authorized to execute timelocked operations once the delay has passed.
+    *   Example: `["0xExecutor1Address", "0xChainlinkKeeperAddress"]`
+*   `superAdmin`: Address to receive the `DEFAULT_ADMIN_ROLE` for this specific `PayNodeAdmin` instance, enabling its governance over roles.
+    *   Example: `0xSuperAdminWalletAddress`
+*   `upgradeAdmin`: Address to receive the `ADMIN_ROLE` for this `PayNodeAdmin` instance, specifically for upgrade-related tasks.
+    *   Example: `0xUpgradeManagerWalletAddress`
+*   `_chainlinkKeeper`: The address of the authorized Chainlink Keeper service for automated upkeep.
+    *   Example: `0xChainlinkKeeperAddress`
+
+#### PGateway Initialization
+*   `_treasuryAddress`: The address where protocol fees will be collected.
+    *   Example: `0xProtocolTreasuryAddress`
+*   `_aggregatorAddress`: The address of the off-chain aggregator service responsible for creating proposals and executing settlements.
+    *   Example: `0xAggregatorServiceAddress`
 
 ## API Documentation
 
-The PayNode Protocol is implemented as a set of Solidity smart contracts, primarily the `PayNode` contract (located in `src/PGateway.sol`). Interaction occurs directly on-chain through transaction calls and event emissions, rather than traditional HTTP requests. The functions below represent the public interface for interacting with the protocol.
+The PayNode protocol consists of several interconnected smart contracts. Interaction occurs by sending transactions to these deployed contract addresses on a supported EVM-compatible blockchain.
 
-### Base Contract
-The main contract providing the core payment gateway logic is `PayNode`.
-Contract Address: `[DeployedContractAddress]` (placeholder for a deployed instance)
+### Base URL
+The "base URL" for interacting with these contracts is the specific contract address on the chosen blockchain network (e.g., Ethereum Mainnet, Polygon, etc.).
 
-### Functions (API)
+### Contracts and Endpoints
 
-#### `initialize(address _treasuryAddress, address _aggregatorAddress)`
-**Description**:
-Initializes the `PayNode` contract upon deployment (specifically for upgradeable proxy setups). Sets the initial treasury and aggregator addresses. Can only be called once.
+#### PayNodeAccessManager API
 
-**Parameters**:
--   `_treasuryAddress (address)`: The address designated to receive protocol fees.
--   `_aggregatorAddress (address)`: The address of the aggregator responsible for matching orders with providers and initiating proposals.
+The `PayNodeAccessManager` contract manages access control, system-wide flags, and emergency states.
 
+##### `public constant ADMIN_ROLE`
+Role identifier for authorized upgrade admins.
+
+##### `public constant OPERATOR_ROLE`
+Role identifier for operational team members.
+
+##### `public constant DISPUTE_MANAGER_ROLE`
+Role identifier for entities authorized to manage disputes.
+
+##### `public constant PLATFORM_SERVICE_ROLE`
+Role identifier for trusted backend services and AI agents.
+
+##### `public constant MIN_DELAY`
+Minimum delay of 2 days for critical operations like admin changes.
+
+##### `public constant TRADING_ENABLED`
+System flag identifier to control overall trading functionality.
+
+##### `public constant WITHDRAWALS_ENABLED`
+System flag identifier to control overall withdrawal functionality.
+
+##### `external initialize(address _pasarAdmin, address _superAdmin, address[] calldata operators)`
+**Description**: Initializes the contract, sets up initial roles, and assigns core admin addresses.
 **Request**:
 ```json
 {
-  "_treasuryAddress": "0xABCDEF1234567890ABCDEF1234567890ABCDEF12",
-  "_aggregatorAddress": "0x0987654321FEDCBA0987654321FEDCBA098765"
+  "_pasarAdmin": "0xPasarAdminContractAddress",
+  "_superAdmin": "0xSuperAdminWalletAddress",
+  "operators": ["0xOperator1Address", "0xOperator2Address"]
 }
 ```
-
 **Response**:
-`{ "status": "Initialized" }` (Indicates successful initialization)
-
+*   No explicit return value.
+*   State changes: `superAdmin`, `pasarAdmin` are set; roles are granted.
+**Events Emitted**: `RoleAssigned`
 **Errors**:
--   `InvalidTreasuryAddress`: Provided treasury address is zero.
--   `InvalidAggregatorAddress`: Provided aggregator address is zero.
--   `Initializable: contract is already initialized`: Attempted to call `initialize` more than once.
+- `InvalidAddress`: Provided zero address for critical roles or empty operators array.
+- `InvalidRoleConfiguration`: Attempted to assign operator role to an existing admin.
 
-#### `pause()`
-**Description**:
-Pauses all contract operations. Only callable by the contract owner. Prevents execution of `whenNotPaused` functions.
-
-**Parameters**:
-None
-
-**Request**:
-`{}`
-
-**Response**:
-`{ "status": "Contract Paused" }`
-
-**Errors**:
--   `Ownable: caller is not the owner`: Caller is not the contract owner.
--   `Pausable: paused`: Contract is already paused.
-
-#### `unpause()`
-**Description**:
-Unpauses the contract, allowing operations to resume. Only callable by the contract owner.
-
-**Parameters**:
-None
-
-**Request**:
-`{}`
-
-**Response**:
-`{ "status": "Contract Unpaused" }`
-
-**Errors**:
--   `Ownable: caller is not the owner`: Caller is not the contract owner.
--   `Pausable: not paused`: Contract is not currently paused.
-
-#### `setSupportedToken(address _token, bool _supported)`
-**Description**:
-Adds or removes an ERC-20 token from the list of supported tokens for orders. Only callable by the contract owner.
-
-**Parameters**:
--   `_token (address)`: The address of the ERC-20 token.
--   `_supported (bool)`: `true` to add support, `false` to remove.
-
+##### `external setSystemFlag(bytes32 flag, bool status)`
+**Description**: Updates the status of a predefined system flag (e.g., `TRADING_ENABLED`, `WITHDRAWALS_ENABLED`). Restricted to `DEFAULT_ADMIN_ROLE`.
 **Request**:
 ```json
 {
-  "_token": "0x1234567890abcdef1234567890abcdef12345678",
-  "_supported": true
+  "flag": "0x" + keccak256("TRADING_ENABLED").toString("hex"), // or keccak256("WITHDRAWALS_ENABLED")
+  "status": true // or false
 }
 ```
-
 **Response**:
-`{ "status": "Token Support Updated" }`
-
+*   No explicit return value.
+*   State changes: `systemFlags[flag]` is updated.
+**Events Emitted**: `SystemFlagUpdated`
 **Errors**:
--   `Ownable: caller is not the owner`: Caller is not the contract owner.
--   `InvalidToken`: Provided token address is zero.
+- `SystemFlagNotFound`: Provided an unrecognized flag.
+- `UnauthorizedOperation`: Caller does not have `DEFAULT_ADMIN_ROLE` or system is locked.
+- `Pausable: paused`: Contract is paused.
 
-#### `setTreasuryAddress(address _newTreasury)`
-**Description**:
-Updates the address designated to receive protocol fees. Only callable by the contract owner.
-
-**Parameters**:
--   `_newTreasury (address)`: The new treasury address.
-
+##### `external setBlacklistStatus(address user, bool status)`
+**Description**: Updates the blacklist status for a single user. Restricted to `OPERATOR_ROLE`.
 **Request**:
 ```json
 {
-  "_newTreasury": "0xABCDEF1234567890ABCDEF1234567890ABCDEF12"
+  "user": "0xUserAddress",
+  "status": true // true to blacklist, false to unblacklist
 }
 ```
-
 **Response**:
-`{ "status": "Treasury Address Updated" }`
-
+*   No explicit return value.
+*   State changes: `isBlacklisted[user]` is updated.
+**Events Emitted**: `BlacklistStatusChanged`
 **Errors**:
--   `Ownable: caller is not the owner`: Caller is not the contract owner.
--   `InvalidAddress`: Provided address is zero.
+- `InvalidAddress`: Provided zero address.
+- `UnauthorizedOperation`: Caller does not have `OPERATOR_ROLE`, system is locked, or attempted to blacklist an admin role.
+- `Pausable: paused`: Contract is paused.
 
-#### `setAggregatorAddress(address _newAggregator)`
-**Description**:
-Updates the address of the aggregator. Only callable by the contract owner.
-
-**Parameters**:
--   `_newAggregator (address)`: The new aggregator address.
-
+##### `external batchUpdateBlacklist(address[] calldata users, bool[] calldata statuses)`
+**Description**: Updates the blacklist status for multiple users in a single transaction. Restricted to `OPERATOR_ROLE`.
 **Request**:
 ```json
 {
-  "_newAggregator": "0x0987654321FEDCBA0987654321FEDCBA098765"
+  "users": ["0xUser1Address", "0xUser2Address"],
+  "statuses": [true, false]
 }
 ```
-
 **Response**:
-`{ "status": "Aggregator Address Updated" }`
-
+*   No explicit return value.
+*   State changes: `isBlacklisted` for each user is updated.
+**Events Emitted**: `BlacklistStatusChanged` for each user.
 **Errors**:
--   `Ownable: caller is not the owner`: Caller is not the contract owner.
--   `InvalidAddress`: Provided address is zero.
+- `InvalidRoleConfiguration`: Array lengths of `users` and `statuses` do not match.
+- `InvalidAddress`: Provided zero address in `users` array.
+- `UnauthorizedOperation`: Caller does not have `OPERATOR_ROLE`, system is locked, or attempted to blacklist an admin role.
+- `Pausable: paused`: Contract is paused.
 
-#### `setProtocolFee(uint64 _newFee)`
-**Description**:
-Sets the protocol fee percentage in basis points (BPS). Only callable by the contract owner. Max 5000 BPS (5%).
-
-**Parameters**:
--   `_newFee (uint64)`: The new protocol fee in basis points (e.g., `500` for 0.5%).
-
+##### `external scheduleAdminChange(address newAdmin, bool isSuperAdmin)`
+**Description**: Schedules a timelocked change for either the `superAdmin` (`DEFAULT_ADMIN_ROLE`) or `pasarAdmin` (`ADMIN_ROLE`) address. Restricted to `DEFAULT_ADMIN_ROLE`.
 **Request**:
 ```json
 {
-  "_newFee": 500
+  "newAdmin": "0xNewAdminAddress",
+  "isSuperAdmin": true // true for superAdmin, false for pasarAdmin
 }
 ```
-
 **Response**:
-`{ "status": "Protocol Fee Updated" }`
-
+*   No explicit return value.
+*   State changes: A `PendingAdminChange` struct is stored, associated with a unique `operationId`.
+**Events Emitted**: `AdminChangeScheduled`
 **Errors**:
--   `Ownable: caller is not the owner`: Caller is not the contract owner.
--   `FeeTooHigh`: Provided fee exceeds the maximum allowed (5000 BPS).
+- `InvalidAddress`: Provided zero address for `newAdmin`.
+- `UnauthorizedOperation`: Caller does not have `DEFAULT_ADMIN_ROLE` or system is locked.
+- `Pausable: paused`: Contract is paused.
 
-#### `setTierLimits(uint256 _smallLimit, uint256 _mediumLimit)`
-**Description**:
-Configures the upper limits for `SMALL` and `MEDIUM` order tiers. Only callable by the contract owner.
-
-**Parameters**:
--   `_smallLimit (uint256)`: Maximum amount for `SMALL` tier orders (in token smallest units).
--   `_mediumLimit (uint256)`: Maximum amount for `MEDIUM` tier orders (in token smallest units).
-
+##### `external executeAdminChange(bytes32 operationId)`
+**Description**: Executes a previously scheduled admin change after its timelock has passed. Restricted to `DEFAULT_ADMIN_ROLE`.
 **Request**:
 ```json
 {
-  "_smallLimit": "5000000000000000000000", // 5000 units
-  "_mediumLimit": "20000000000000000000000" // 20000 units
+  "operationId": "0xUniqueOperationId" // bytes32 identifier from AdminChangeScheduled event
 }
 ```
-
 **Response**:
-`{ "status": "Tier Limits Updated" }`
-
+*   No explicit return value.
+*   State changes: Old admin role revoked, new admin role granted, `superAdmin` or `pasarAdmin` state variable updated.
+**Events Emitted**: `RoleAssigned`
 **Errors**:
--   `Ownable: caller is not the owner`: Caller is not the contract owner.
--   `InvalidLimits`: Limits are not positive or `_mediumLimit` is not greater than `_smallLimit`.
+- `UnauthorizedOperation`: Operation does not exist or timelock has not passed.
+- `Pausable: paused`: Contract is paused.
 
-#### `setOrderExpiryWindow(uint256 _newWindow)`
-**Description**:
-Sets the duration after which an order expires if not fulfilled. Only callable by the contract owner.
+##### `external emergencyShutdown()`
+**Description**: Initiates an emergency shutdown, locking core system functions and pausing the contract. Restricted to `DEFAULT_ADMIN_ROLE`.
+**Request**: No parameters.
+**Response**:
+*   No explicit return value.
+*   State changes: `systemLocked` set to `true`, contract paused.
+**Events Emitted**: `EmergencyShutdown`
+**Errors**:
+- `AccessControl: sender is not DEFAULT_ADMIN_ROLE`: Caller does not have `DEFAULT_ADMIN_ROLE`.
 
-**Parameters**:
--   `_newWindow (uint256)`: The new expiry window in seconds.
+##### `external restoreSystem()`
+**Description**: Restores core system functions and unpauses the contract after an emergency shutdown. Restricted to `DEFAULT_ADMIN_ROLE`.
+**Request**: No parameters.
+**Response**:
+*   No explicit return value.
+*   State changes: `systemLocked` set to `false`, contract unpaused.
+**Events Emitted**: `SystemRestored`
+**Errors**:
+- `AccessControl: sender is not DEFAULT_ADMIN_ROLE`: Caller does not have `DEFAULT_ADMIN_ROLE`.
 
+##### `external pause()`
+**Description**: Pauses the contract, preventing calls to functions protected by `whenNotPaused`. Restricted to `DEFAULT_ADMIN_ROLE` and callable only when the system is active.
+**Request**: No parameters.
+**Response**:
+*   No explicit return value.
+*   State changes: Contract paused.
+**Events Emitted**: `Paused` (from PausableUpgradeable)
+**Errors**:
+- `AccessControl: sender is not DEFAULT_ADMIN_ROLE`: Caller does not have `DEFAULT_ADMIN_ROLE`.
+- `UnauthorizedOperation`: System is in an emergency locked state.
+
+##### `external unpause()`
+**Description**: Unpauses the contract, allowing calls to functions protected by `whenNotPaused`. Restricted to `DEFAULT_ADMIN_ROLE` and callable only when the system is active.
+**Request**: No parameters.
+**Response**:
+*   No explicit return value.
+*   State changes: Contract unpaused.
+**Events Emitted**: `Unpaused` (from PausableUpgradeable)
+**Errors**:
+- `AccessControl: sender is not DEFAULT_ADMIN_ROLE`: Caller does not have `DEFAULT_ADMIN_ROLE`.
+- `UnauthorizedOperation`: System is in an emergency locked state.
+
+##### `external view isOperator(address account) returns (bool)`
+**Description**: Checks if an address has the `OPERATOR_ROLE`.
 **Request**:
 ```json
 {
-  "_newWindow": 3600 // 1 hour
+  "account": "0xAccountAddress"
+}
+```
+**Response**:
+```json
+{
+  "isOperator": true // or false
 }
 ```
 
+##### `external view getAccountRoles(address account) returns (bytes32[] memory)`
+**Description**: Retrieves all roles (excluding `DEFAULT_ADMIN_ROLE` if not explicitly granted) assigned to an address.
+**Request**:
+```json
+{
+  "account": "0xAccountAddress"
+}
+```
 **Response**:
-`{ "status": "Order Expiry Window Updated" }`
+```json
+{
+  "roles": ["0x..." /* ADMIN_ROLE hash */, "0x..." /* OPERATOR_ROLE hash */]
+}
+```
 
+##### `public view isAdminChangeReady(bytes32 operationId) returns (bool ready)`
+**Description**: Checks if a scheduled admin change operation is ready for execution (timelock passed).
+**Request**:
+```json
+{
+  "operationId": "0xUniqueOperationId"
+}
+```
+**Response**:
+```json
+{
+  "ready": true // or false
+}
+```
+
+##### `external cancelAdminChange(bytes32 operationId)`
+**Description**: Cancels a pending admin change operation. Restricted to `DEFAULT_ADMIN_ROLE`.
+**Request**:
+```json
+{
+  "operationId": "0xUniqueOperationId"
+}
+```
+**Response**:
+*   No explicit return value.
+*   State changes: `PendingAdminChange` struct for `operationId` is deleted.
+**Events Emitted**: `AdminChangeScheduled` (with scheduleTime 0 to signify cancellation).
 **Errors**:
--   `Ownable: caller is not the owner`: Caller is not the contract owner.
--   `InvalidWindow`: Provided window is zero.
+- `UnauthorizedOperation`: Caller does not have `DEFAULT_ADMIN_ROLE`, system is locked, contract is paused, or operation ID is invalid.
 
-#### `setProposalTimeout(uint256 _newTimeout)`
-**Description**:
-Sets the duration within which a provider must accept a settlement proposal. Only callable by the contract owner.
+##### `external virtual resolveDispute(uint256 disputeId, address winner)`
+**Description**: Placeholder virtual function for dispute resolution. Intended to be overridden by a derived contract. Restricted to `DISPUTE_MANAGER_ROLE`.
+**Request**:
+```json
+{
+  "disputeId": 123,
+  "winner": "0xWinnerAddress"
+}
+```
+**Response**:
+*   No explicit return value (implementation in derived contract).
+**Errors**:
+- `InvalidAddress`: Provided zero address for `winner`.
+- `AccessControl: sender is not DISPUTE_MANAGER_ROLE`: Caller does not have `DISPUTE_MANAGER_ROLE`.
+- `Pausable: paused`: Contract is paused.
 
-**Parameters**:
--   `_newTimeout (uint256)`: The new proposal timeout in seconds.
+##### `external virtual managePlatformService(bytes32 serviceId, bool enable)`
+**Description**: Placeholder virtual function for managing platform services. Intended to be overridden by a derived contract. Restricted to `PLATFORM_SERVICE_ROLE`.
+**Request**:
+```json
+{
+  "serviceId": "0x" + keccak256("SOME_SERVICE_ID").toString("hex"),
+  "enable": true // or false
+}
+```
+**Response**:
+*   No explicit return value (implementation in derived contract).
+**Errors**:
+- `AccessControl: sender is not PLATFORM_SERVICE_ROLE`: Caller does not have `PLATFORM_SERVICE_ROLE`.
+- `Pausable: paused`: Contract is paused.
 
+##### Errors:
+- `InvalidAddress`: A zero address was provided where a valid address is required.
+- `UserBlacklisted`: An action was attempted by a blacklisted user.
+- `InvalidRoleConfiguration`: Inconsistency in role configuration, e.g., mismatched array lengths.
+- `SystemFlagNotFound`: An attempt was made to set an unrecognized system flag.
+- `UnauthorizedOperation`: An unauthorized address attempted a restricted operation.
+- `BatchOperationFailed`: A batch operation failed at a specific index. (Note: this custom error is defined but not explicitly thrown in the provided `batchUpdateBlacklist` implementation if an item fails validation, it reverts the whole transaction with `InvalidAddress` or `UnauthorizedOperation`).
+
+#### PayNodeAdmin API
+
+The `PayNodeAdmin` contract is a timelock controller for managing contract upgrades and critical role changes, integrated with Chainlink Automation.
+
+##### `public constant ADMIN_ROLE`
+Role identifier for authorized upgrade admins.
+
+##### `public constant MIN_DELAY`
+Minimum delay of 2 days before an upgrade or role change can be executed.
+
+##### `public constant UPKEEP_COOLDOWN`
+Cooldown period of 1 hour between Chainlink Automation upkeep calls.
+
+##### `constructor(address[] memory proposers, address[] memory executors, address superAdmin, address upgradeAdmin, address _chainlinkKeeper)`
+**Description**: Initializes the contract with timelock parameters, initial roles, and Chainlink Keeper address.
+**Request**:
+```json
+{
+  "proposers": ["0xProposerAddress"],
+  "executors": ["0xExecutorAddress"],
+  "superAdmin": "0xSuperAdminAddress",
+  "upgradeAdmin": "0xUpgradeAdminAddress",
+  "_chainlinkKeeper": "0xChainlinkKeeperAddress"
+}
+```
+**Response**:
+*   No explicit return value.
+*   State changes: `chainlinkKeeper`, `ADMIN_ROLE`, `DEFAULT_ADMIN_ROLE` are set.
+**Errors**:
+- `InvalidAddress`: Provided zero address for `_chainlinkKeeper`.
+
+##### `external scheduleUpgrade(address target, address newImplementation)`
+**Description**: Schedules an upgrade for a proxy contract with a timelock delay. Restricted to `ADMIN_ROLE`.
+**Request**:
+```json
+{
+  "target": "0xProxyContractAddress",
+  "newImplementation": "0xNewImplementationAddress"
+}
+```
+**Response**:
+*   No explicit return value.
+*   State changes: `pendingUpgrades` is updated, `upgradeQueue` is updated.
+**Events Emitted**: `UpgradeScheduled`
+**Errors**:
+- `InvalidAddress`: Provided zero address for `target` or `newImplementation`.
+- `UpgradeAlreadyPending`: An upgrade is already scheduled for the `target` proxy.
+- `AccessControl: sender is not ADMIN_ROLE`: Caller does not have `ADMIN_ROLE`.
+- `Pausable: paused`: Contract is paused.
+
+##### `external cancelUpgrade(address target)`
+**Description**: Cancels a scheduled upgrade for a proxy contract. Restricted to `ADMIN_ROLE`.
+**Request**:
+```json
+{
+  "target": "0xProxyContractAddress"
+}
+```
+**Response**:
+*   No explicit return value.
+*   State changes: `pendingUpgrades` is updated, `upgradeQueue` is updated.
+**Events Emitted**: `UpgradeCancelled`
+**Errors**:
+- `NoUpgradePending`: No upgrade is pending for the `target` proxy.
+- `AccessControl: sender is not ADMIN_ROLE`: Caller does not have `ADMIN_ROLE`.
+- `Pausable: paused`: Contract is paused.
+
+##### `external performUpgrade(address target)`
+**Description**: Manually executes a scheduled upgrade for a proxy contract after its timelock has passed. Restricted to `ADMIN_ROLE`.
+**Request**:
+```json
+{
+  "target": "0xProxyContractAddress"
+}
+```
+**Response**:
+*   No explicit return value.
+*   State changes: Proxy's implementation is updated.
+**Events Emitted**: `UpgradeExecuted`
+**Errors**:
+- `NoUpgradePending`: No upgrade is pending for the `target` proxy.
+- `UpgradeTooEarly`: The timelock period has not yet passed.
+- `UpgradeFailed`: Low-level call to `upgradeTo` failed.
+- `AccessControl: sender is not ADMIN_ROLE`: Caller does not have `ADMIN_ROLE`.
+- `Pausable: paused`: Contract is paused.
+- `ReentrancyGuard: reentrant call`: Reentrancy detected.
+
+##### `external view checkUpkeep(bytes calldata /* checkData */) returns (bool upkeepNeeded, bytes memory performData)`
+**Description**: Chainlink Automation compatible function to check if any pending upgrade is ready for execution.
+**Request**:
+```json
+{
+  "checkData": "0x" // Not used, can be empty
+}
+```
+**Response**:
+```json
+{
+  "upkeepNeeded": true, // or false
+  "performData": "0xEncodedTargetAddress" // or "" if no upkeep needed
+}
+```
+
+##### `external performUpkeep(bytes calldata performData)`
+**Description**: Executes an upgrade via Chainlink Automation. Restricted to the configured `chainlinkKeeper` address.
+**Request**:
+```json
+{
+  "performData": "0xEncodedTargetAddress" // Encoded target address from checkUpkeep
+}
+```
+**Response**:
+*   No explicit return value.
+*   State changes: Proxy's implementation is updated, `lastUpkeepTime` updated.
+**Events Emitted**: `UpkeepPerformed`, `UpgradeExecuted`
+**Errors**:
+- `OnlyChainlinkKeeper`: Caller is not the authorized Chainlink Keeper.
+- `UpkeepCooldownActive`: Cooldown period since last upkeep has not elapsed.
+- `NoUpgradePending`: No upgrade is pending for the decoded `target` address.
+- `UpgradeTooEarly`: The timelock period has not yet passed.
+- `UpgradeFailed`: Low-level call to `upgradeTo` failed.
+- `Pausable: paused`: Contract is paused.
+- `ReentrancyGuard: reentrant call`: Reentrancy detected.
+
+##### `external scheduleRoleChange(address account, bytes32 role, bool grant)`
+**Description**: Schedules a role assignment or revocation with a timelock delay. Restricted to `ADMIN_ROLE`.
+**Request**:
+```json
+{
+  "account": "0xAccountAddress",
+  "role": "0x" + keccak256("ADMIN_ROLE").toString("hex"), // or other role hashes
+  "grant": true // true to grant, false to revoke
+}
+```
+**Response**:
+*   No explicit return value.
+*   State changes: A `PendingRoleChange` struct is stored, associated with a unique `operationId`.
+**Events Emitted**: `RoleChangeScheduled`
+**Errors**:
+- `InvalidAddress`: Provided zero address for `account`.
+- `AccessControl: sender is not ADMIN_ROLE`: Caller does not have `ADMIN_ROLE`.
+- `Pausable: paused`: Contract is paused.
+
+##### `external executeRoleChange(bytes32 operationId)`
+**Description**: Executes a pending role change after the timelock period. Restricted to `DEFAULT_ADMIN_ROLE`.
+**Request**:
+```json
+{
+  "operationId": "0xUniqueOperationId" // bytes32 identifier from RoleChangeScheduled event
+}
+```
+**Response**:
+*   No explicit return value.
+*   State changes: Role is granted or revoked.
+**Events Emitted**: `RoleChangeExecuted`
+**Errors**:
+- `RoleChangeNotReady`: Operation does not exist or timelock has not passed.
+- `AccessControl: sender is not DEFAULT_ADMIN_ROLE`: Caller does not have `DEFAULT_ADMIN_ROLE`.
+- `Pausable: paused`: Contract is paused.
+
+##### `public view isRoleChangeReady(bytes32 operationId) returns (bool ready)`
+**Description**: Checks if a scheduled role change operation is ready for execution.
+**Request**:
+```json
+{
+  "operationId": "0xUniqueOperationId"
+}
+```
+**Response**:
+```json
+{
+  "ready": true // or false
+}
+```
+
+##### `external cancelRoleChange(bytes32 operationId)`
+**Description**: Cancels a pending role change operation. Restricted to `DEFAULT_ADMIN_ROLE`.
+**Request**:
+```json
+{
+  "operationId": "0xUniqueOperationId"
+}
+```
+**Response**:
+*   No explicit return value.
+*   State changes: `PendingRoleChange` struct for `operationId` is deleted.
+**Events Emitted**: `RoleChangeScheduled` (with scheduleTime 0 to signify cancellation).
+**Errors**:
+- `RoleChangeNotReady`: Operation does not exist.
+- `AccessControl: sender is not DEFAULT_ADMIN_ROLE`: Caller does not have `DEFAULT_ADMIN_ROLE`.
+- `Pausable: paused`: Contract is paused.
+
+##### `external pause()`
+**Description**: Pauses the contract, halting critical operations. Restricted to `DEFAULT_ADMIN_ROLE`.
+**Request**: No parameters.
+**Response**:
+*   No explicit return value.
+*   State changes: Contract paused.
+**Events Emitted**: `Paused` (from Pausable)
+**Errors**:
+- `AccessControl: sender is not DEFAULT_ADMIN_ROLE`: Caller does not have `DEFAULT_ADMIN_ROLE`.
+
+##### `external unpause()`
+**Description**: Unpauses the contract, resuming operations. Restricted to `DEFAULT_ADMIN_ROLE`.
+**Request**: No parameters.
+**Response**:
+*   No explicit return value.
+*   State changes: Contract unpaused.
+**Events Emitted**: `Unpaused` (from Pausable)
+**Errors**:
+- `AccessControl: sender is not DEFAULT_ADMIN_ROLE`: Caller does not have `DEFAULT_ADMIN_ROLE`.
+
+##### `external view getUpgradeQueue() returns (address[] memory)`
+**Description**: Returns the list of proxy contracts with currently pending upgrades in the queue.
+**Request**: No parameters.
+**Response**:
+```json
+{
+  "upgradeQueue": ["0xProxy1Address", "0xProxy2Address"]
+}
+```
+
+##### Errors:
+- `InvalidAddress`: A zero address was provided.
+- `UpgradeAlreadyPending`: An upgrade is already pending for the target contract.
+- `NoUpgradePending`: No upgrade is pending for the target contract.
+- `UpgradeTooEarly`: The timelock for the upgrade has not expired.
+- `UpgradeFailed`: The low-level call to upgrade the proxy failed.
+- `OnlyChainlinkKeeper`: The caller is not the authorized Chainlink Keeper.
+- `UpkeepCooldownActive`: The cooldown period for `performUpkeep` has not elapsed.
+- `RoleChangeNotReady`: The specified role change operation does not exist or its timelock has not expired.
+- `UnauthorizedOperation`: An operation was attempted without proper authorization (e.g., trying to modify a role without `DEFAULT_ADMIN_ROLE`).
+
+#### PGateway API
+
+The `PGateway` contract is the core logic for managing payment orders, provider intents, and settlement execution.
+
+##### `enum OrderTier { SMALL, MEDIUM, LARGE }`
+Defines order size categories.
+
+##### `enum OrderStatus { PENDING, PROPOSED, ACCEPTED, FULFILLED, REFUNDED, CANCELLED }`
+Defines the lifecycle status of an order.
+
+##### `enum ProposalStatus { PENDING, ACCEPTED, REJECTED, TIMEOUT, CANCELLED }`
+Defines the lifecycle status of a settlement proposal.
+
+##### `public MAX_BPS`
+Constant representing 100% in basis points (100,000).
+
+##### `public SMALL_TIER_LIMIT`
+Amount threshold for `SMALL` orders (5,000 * 10^18 units).
+
+##### `public MEDIUM_TIER_LIMIT`
+Amount threshold for `MEDIUM` orders (20,000 * 10^18 units).
+
+##### `public protocolFeePercent`
+Current protocol fee percentage in basis points (e.g., 500 for 0.5%).
+
+##### `public orderExpiryWindow`
+Duration after which an order expires if not fulfilled (default 1 hour).
+
+##### `public proposalTimeout`
+Duration within which a provider must accept a proposal (default 30 seconds).
+
+##### `public treasuryAddress`
+Address designated to receive protocol fees.
+
+##### `public aggregatorAddress`
+Address authorized to act as the off-chain aggregator.
+
+##### `external initialize(address _treasuryAddress, address _aggregatorAddress)`
+**Description**: Initializes the contract with the treasury and aggregator addresses.
+**Request**:
+```json
+{
+  "_treasuryAddress": "0xProtocolTreasuryAddress",
+  "_aggregatorAddress": "0xAggregatorServiceAddress"
+}
+```
+**Response**:
+*   No explicit return value.
+*   State changes: `treasuryAddress`, `aggregatorAddress` are set.
+**Errors**:
+- `InvalidTreasuryAddress`: Provided zero address for `_treasuryAddress`.
+- `InvalidAggregatorAddress`: Provided zero address for `_aggregatorAddress`.
+
+##### `external pause()`
+**Description**: Pauses the contract, halting critical operations. Restricted to `onlyOwner`.
+**Request**: No parameters.
+**Response**:
+*   No explicit return value.
+*   State changes: Contract paused.
+**Events Emitted**: `Paused` (from PausableUpgradeable)
+**Errors**:
+- `Ownable2Step: caller is not the owner`: Caller is not the contract owner.
+
+##### `external unpause()`
+**Description**: Unpauses the contract, resuming operations. Restricted to `onlyOwner`.
+**Request**: No parameters.
+**Response**:
+*   No explicit return value.
+*   State changes: Contract unpaused.
+**Events Emitted**: `Unpaused` (from PausableUpgradeable)
+**Errors**:
+- `Ownable2Step: caller is not the owner`: Caller is not the contract owner.
+
+##### `external setSupportedToken(address _token, bool _supported)`
+**Description**: Whitelists or unwhitelists an ERC20 token for use in the protocol. Restricted to `onlyOwner`.
+**Request**:
+```json
+{
+  "_token": "0xERC20TokenAddress",
+  "_supported": true // true to support, false to remove support
+}
+```
+**Response**:
+*   No explicit return value.
+*   State changes: `supportedTokens[_token]` is updated.
+**Errors**:
+- `InvalidToken`: Provided zero address for `_token`.
+- `Ownable2Step: caller is not the owner`: Caller is not the contract owner.
+
+##### `external setTreasuryAddress(address _newTreasury)`
+**Description**: Updates the address designated to receive protocol fees. Restricted to `onlyOwner`.
+**Request**:
+```json
+{
+  "_newTreasury": "0xNewTreasuryAddress"
+}
+```
+**Response**:
+*   No explicit return value.
+*   State changes: `treasuryAddress` is updated.
+**Errors**:
+- `InvalidAddress`: Provided zero address for `_newTreasury`.
+- `Ownable2Step: caller is not the owner`: Caller is not the contract owner.
+
+##### `external setAggregatorAddress(address _newAggregator)`
+**Description**: Updates the address authorized to act as the off-chain aggregator. Restricted to `onlyOwner`.
+**Request**:
+```json
+{
+  "_newAggregator": "0xNewAggregatorAddress"
+}
+```
+**Response**:
+*   No explicit return value.
+*   State changes: `aggregatorAddress` is updated.
+**Errors**:
+- `InvalidAddress`: Provided zero address for `_newAggregator`.
+- `Ownable2Step: caller is not the owner`: Caller is not the contract owner.
+
+##### `external setProtocolFee(uint64 _newFee)`
+**Description**: Sets the protocol fee percentage in basis points. Restricted to `onlyOwner`.
+**Request**:
+```json
+{
+  "_newFee": 500 // 0.5% (Max 5000 for 5%)
+}
+```
+**Response**:
+*   No explicit return value.
+*   State changes: `protocolFeePercent` is updated.
+**Events Emitted**: No specific event for this function is defined, though a general `ProtocolFeeUpdated` event is listed in `architecture.md`.
+**Errors**:
+- `FeeTooHigh`: Provided fee exceeds the maximum allowed (5%).
+- `Ownable2Step: caller is not the owner`: Caller is not the contract owner.
+
+##### `external setTierLimits(uint256 _smallLimit, uint256 _mediumLimit)`
+**Description**: Sets the amount thresholds for `SMALL` and `MEDIUM` order tiers. Restricted to `onlyOwner`.
+**Request**:
+```json
+{
+  "_smallLimit": "5000000000000000000000", // e.g., 5000 units in wei
+  "_mediumLimit": "20000000000000000000000" // e.g., 20000 units in wei
+}
+```
+**Response**:
+*   No explicit return value.
+*   State changes: `SMALL_TIER_LIMIT`, `MEDIUM_TIER_LIMIT` are updated.
+**Events Emitted**: No specific event for this function is defined, though a general `TierLimitsUpdated` event is listed in `architecture.md`.
+**Errors**:
+- `InvalidLimits`: Provided invalid limits (e.g., `_smallLimit` is zero or `_mediumLimit` is not greater than `_smallLimit`).
+- `Ownable2Step: caller is not the owner`: Caller is not the contract owner.
+
+##### `external setOrderExpiryWindow(uint256 _newWindow)`
+**Description**: Sets the duration after which an order expires if not fulfilled. Restricted to `onlyOwner`.
+**Request**:
+```json
+{
+  "_newWindow": 3600 // 1 hour in seconds
+}
+```
+**Response**:
+*   No explicit return value.
+*   State changes: `orderExpiryWindow` is updated.
+**Errors**:
+- `InvalidWindow`: Provided zero for `_newWindow`.
+- `Ownable2Step: caller is not the owner`: Caller is not the contract owner.
+
+##### `external setProposalTimeout(uint256 _newTimeout)`
+**Description**: Sets the duration within which a provider must accept a proposal. Restricted to `onlyOwner`.
 **Request**:
 ```json
 {
   "_newTimeout": 30 // 30 seconds
 }
 ```
-
 **Response**:
-`{ "status": "Proposal Timeout Updated" }`
-
+*   No explicit return value.
+*   State changes: `proposalTimeout` is updated.
 **Errors**:
--   `Ownable: caller is not the owner`: Caller is not the contract owner.
--   `InvalidTimeout`: Provided timeout is zero.
+- `InvalidTimeout`: Provided zero for `_newTimeout`.
+- `Ownable2Step: caller is not the owner`: Caller is not the contract owner.
 
-#### `registerIntent(string calldata _currency, uint256 _availableAmount, uint64 _minFeeBps, uint64 _maxFeeBps, uint256 _commitmentWindow)`
-**Description**:
-Allows a provider to register their intent to fulfill payments, specifying their available capacity, accepted currency, fee range, and commitment window.
-
-**Parameters**:
--   `_currency (string)`: The currency code the provider accepts (e.g., "NGN", "USD").
--   `_availableAmount (uint256)`: The total amount (in native token units) the provider is willing to process.
--   `_minFeeBps (uint64)`: Minimum fee the provider charges, in basis points (e.g., `50` for 0.05%).
--   `_maxFeeBps (uint64)`: Maximum fee the provider charges, in basis points.
--   `_commitmentWindow (uint256)`: Time in seconds a provider has to accept a proposal.
-
+##### `external registerIntent(string calldata _currency, uint256 _availableAmount, uint64 _minFeeBps, uint64 _maxFeeBps, uint256 _commitmentWindow)`
+**Description**: Registers or updates a provider's intent to fulfill orders, specifying available capacity and fee preferences.
 **Request**:
 ```json
 {
   "_currency": "USD",
-  "_availableAmount": "10000000000000000000000", // 10000 USD equivalent
+  "_availableAmount": "100000000000000000000", // e.g., 100 units in wei
   "_minFeeBps": 100, // 0.1%
   "_maxFeeBps": 500, // 0.5%
-  "_commitmentWindow": 600 // 10 minutes
+  "_commitmentWindow": 600 // 10 minutes in seconds
 }
 ```
-
 **Response**:
-`{ "status": "IntentRegisteredEventEmitted" }` (Indicates successful registration)
-
+*   No explicit return value.
+*   State changes: `providerIntents` for `msg.sender` is created/updated, `registeredProviders` array potentially updated.
+**Events Emitted**: `IntentRegistered`
 **Errors**:
--   `Pausable: paused`: Contract is paused.
--   `InvalidAmount`: Provided available amount is zero.
--   `InvalidFees`: Minimum fee is greater than maximum fee.
--   `FeesTooHigh`: Maximum fee exceeds 10000 BPS (10%).
--   `InvalidCommitmentWindow`: Provided commitment window is zero.
--   `ProviderBlacklisted`: The calling provider is blacklisted.
+- `InvalidAmount`: Provided zero for `_availableAmount`.
+- `InvalidFees`: `_minFeeBps` is greater than `_maxFeeBps` or `_maxFeeBps` exceeds 10,000 (10%).
+- `InvalidCommitmentWindow`: Provided zero for `_commitmentWindow`.
+- `ProviderBlacklisted`: The provider is blacklisted.
+- `Pausable: paused`: Contract is paused.
+- `ReentrancyGuard: reentrant call`: Reentrancy detected.
 
-#### `updateIntent(string calldata _currency, uint256 _newAmount)`
-**Description**:
-Updates the available amount for an existing provider intent.
-
-**Parameters**:
--   `_currency (string)`: The currency code of the intent to update.
--   `_newAmount (uint256)`: The new available amount for the provider (in native token units).
-
+##### `external updateIntent(string calldata _currency, uint256 _newAmount)`
+**Description**: Updates the available amount and extends the expiry for an existing provider intent. Restricted to `onlyProvider`.
 **Request**:
 ```json
 {
   "_currency": "USD",
-  "_newAmount": "15000000000000000000000" // 15000 USD equivalent
+  "_newAmount": "150000000000000000000" // e.g., 150 units in wei
 }
 ```
-
 **Response**:
-`{ "status": "IntentUpdatedEventEmitted" }`
-
+*   No explicit return value.
+*   State changes: `providerIntents[msg.sender].availableAmount`, `registeredAt`, `expiresAt` are updated.
+**Events Emitted**: `IntentUpdated`
 **Errors**:
--   `NotRegisteredProvider`: Caller is not a registered provider.
--   `Pausable: paused`: Contract is paused.
--   `NoActiveIntent`: The provider does not have an active intent.
--   `InvalidAmount`: Provided new amount is zero.
+- `NotRegisteredProvider`: Caller is not a registered provider.
+- `NoActiveIntent`: Provider does not have an active intent.
+- `InvalidAmount`: Provided zero for `_newAmount`.
+- `Pausable: paused`: Contract is paused.
 
-#### `expireIntent(address _provider)`
-**Description**:
-Marks a provider's intent as expired if the expiry time has passed. Only callable by the aggregator.
-
-**Parameters**:
--   `_provider (address)`: The address of the provider whose intent is to be expired.
-
+##### `external expireIntent(address _provider)`
+**Description**: Marks a provider's intent as inactive if its expiry time has passed. Restricted to `onlyAggregator`.
 **Request**:
 ```json
 {
-  "_provider": "0x0987654321FEDCBA0987654321FEDCBA098765"
+  "_provider": "0xProviderAddress"
 }
 ```
-
 **Response**:
-`{ "status": "IntentExpiredEventEmitted" }`
-
+*   No explicit return value.
+*   State changes: `providerIntents[_provider].isActive` is set to `false`.
+**Events Emitted**: `IntentExpired`
 **Errors**:
--   `OnlyAggregator`: Caller is not the aggregator address.
--   `IntentNotActive`: The provider's intent is not active.
--   `IntentNotExpired`: The intent's expiry time has not yet passed.
+- `OnlyAggregator`: Caller is not the aggregator.
+- `IntentNotActive`: Provider intent is not active.
+- `IntentNotExpired`: The intent's expiry time has not yet passed.
 
-#### `reserveIntent(address _provider, uint256 _amount)`
-**Description**:
-Reserves a specified amount from a provider's available capacity when a proposal is sent to them. Only callable by the aggregator.
-
-**Parameters**:
--   `_provider (address)`: The address of the provider.
--   `_amount (uint256)`: The amount to reserve (in native token units).
-
+##### `external reserveIntent(address _provider, uint256 _amount)`
+**Description**: Reserves a specified amount from a provider's available capacity when a proposal is sent. Restricted to `onlyAggregator`.
 **Request**:
 ```json
 {
-  "_provider": "0x0987654321FEDCBA0987654321FEDCBA098765",
-  "_amount": "500000000000000000000" // 500 units
+  "_provider": "0xProviderAddress",
+  "_amount": "50000000000000000000" // e.g., 50 units in wei
 }
 ```
-
 **Response**:
-`{ "status": "Capacity Reserved" }`
-
+*   No explicit return value.
+*   State changes: `providerIntents[_provider].availableAmount` is decreased.
 **Errors**:
--   `OnlyAggregator`: Caller is not the aggregator address.
--   `IntentNotActive`: The provider's intent is not active.
--   `InsufficientCapacity`: Provider does not have enough available amount to reserve.
+- `OnlyAggregator`: Caller is not the aggregator.
+- `IntentNotActive`: Provider intent is not active.
+- `InsufficientCapacity`: Provider's available amount is less than the requested `_amount`.
 
-#### `releaseIntent(address _provider, uint256 _amount, string calldata _reason)`
-**Description**:
-Releases a specified amount back to a provider's available capacity, typically when a proposal is rejected or times out. Only callable by the aggregator.
-
-**Parameters**:
--   `_provider (address)`: The address of the provider.
--   `_amount (uint256)`: The amount to release (in native token units).
--   `_reason (string)`: A brief reason for the release (e.g., "Proposal Rejected").
-
+##### `external releaseIntent(address _provider, uint256 _amount, string calldata _reason)`
+**Description**: Releases a previously reserved amount back to a provider's available capacity (e.g., if a proposal is rejected or times out). Restricted to `onlyAggregator`.
 **Request**:
 ```json
 {
-  "_provider": "0x0987654321FEDCBA0987654321FEDCBA098765",
-  "_amount": "500000000000000000000", // 500 units
+  "_provider": "0xProviderAddress",
+  "_amount": "50000000000000000000", // e.g., 50 units in wei
   "_reason": "Proposal Rejected"
 }
 ```
-
 **Response**:
-`{ "status": "IntentReleasedEventEmitted" }`
-
+*   No explicit return value.
+*   State changes: `providerIntents[_provider].availableAmount` is increased.
+**Events Emitted**: `IntentReleased`
 **Errors**:
--   `OnlyAggregator`: Caller is not the aggregator address.
+- `OnlyAggregator`: Caller is not the aggregator.
 
-#### `getProviderIntent(address _provider)`
-**Description**:
-Retrieves the current intent details for a given provider.
-
-**Parameters**:
--   `_provider (address)`: The address of the provider.
-
-**Return Value**:
-`(ProviderIntent memory)`: A struct containing:
--   `provider (address)`: The provider's address.
--   `currency (string)`: The currency code.
--   `availableAmount (uint256)`: Current available capacity.
--   `minFeeBps (uint64)`: Minimum fee in BPS.
--   `maxFeeBps (uint64)`: Maximum fee in BPS.
--   `registeredAt (uint256)`: Timestamp of registration.
--   `expiresAt (uint256)`: Timestamp of expiration.
--   `commitmentWindow (uint256)`: Provider's commitment window.
--   `isActive (bool)`: Whether the intent is active.
-
+##### `external view getProviderIntent(address _provider) returns (ProviderIntent memory)`
+**Description**: Retrieves the active intent details for a given provider.
 **Request**:
 ```json
 {
-  "_provider": "0x0987654321FEDCBA0987654321FEDCBA098765"
+  "_provider": "0xProviderAddress"
 }
 ```
-
 **Response**:
 ```json
 {
-  "provider": "0x0987654321FEDCBA0987654321FEDCBA098765",
+  "provider": "0xProviderAddress",
   "currency": "USD",
-  "availableAmount": "10000000000000000000000",
+  "availableAmount": "100000000000000000000",
   "minFeeBps": 100,
   "maxFeeBps": 500,
   "registeredAt": 1678886400,
@@ -454,470 +934,303 @@ Retrieves the current intent details for a given provider.
 }
 ```
 
-**Errors**:
--   None (returns default struct if provider not found)
-
-#### `createOrder(address _token, uint256 _amount, address _refundAddress)`
-**Description**:
-Initiates a new payment order. The user's tokens are transferred to the contract. A unique order ID is generated and returned.
-
-**Parameters**:
--   `_token (address)`: The ERC-20 token address for the payment.
--   `_amount (uint256)`: The amount of tokens for the order (in token smallest units).
--   `_refundAddress (address)`: The address to which funds will be refunded if the order fails or is cancelled.
-
-**Return Value**:
-`(bytes32)`: The unique `orderId` generated for the new order.
-
+##### `external createOrder(address _token, uint256 _amount, address _refundAddress) returns (bytes32 orderId)`
+**Description**: Creates a new order, transfers tokens from the user to the contract, and generates a unique `orderId`.
 **Request**:
 ```json
 {
-  "_token": "0x1234567890abcdef1234567890abcdef12345678",
-  "_amount": "1000000000000000000", // 1 token unit
-  "_refundAddress": "0xABCDEF1234567890ABCDEF1234567890ABCDEF12"
+  "_token": "0xERC20TokenAddress",
+  "_amount": "1000000000000000000", // e.g., 1 ETH/ERC20 unit in wei
+  "_refundAddress": "0xUserRefundAddress"
 }
 ```
-
 **Response**:
 ```json
 {
-  "orderId": "0x1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b"
+  "orderId": "0xUniqueOrderId"
 }
 ```
-
+**Events Emitted**: `OrderCreated`
 **Errors**:
--   `Pausable: paused`: Contract is paused.
--   `TokenNotSupported`: The specified token is not supported by the contract.
--   `InvalidAmount`: Provided amount is zero.
--   `InvalidRefundAddress`: Provided refund address is zero.
--   `ERC20: transfer amount exceeds balance` or `ERC20: transfer from failed`: User does not have sufficient tokens or allowance.
+- `InvalidAmount`: Provided zero for `_amount`.
+- `InvalidRefundAddress`: Provided zero address for `_refundAddress`.
+- `TokenNotSupported`: The specified token is not whitelisted.
+- `Pausable: paused`: Contract is paused.
+- `ReentrancyGuard: reentrant call`: Reentrancy detected.
+- `ERC20: transferFrom failed`: Token transfer failed (e.g., insufficient allowance or balance).
 
-#### `getOrder(bytes32 _orderId)`
-**Description**:
-Retrieves the details of a specific payment order.
-
-**Parameters**:
--   `_orderId (bytes32)`: The unique identifier of the order.
-
-**Return Value**:
-`(Order memory)`: A struct containing:
--   `orderId (bytes32)`: The unique identifier of the order.
--   `user (address)`: The address of the user who created the order.
--   `token (address)`: The ERC-20 token address.
--   `amount (uint256)`: The order amount.
--   `tier (OrderTier)`: The order's tier (SMALL, MEDIUM, LARGE).
--   `status (OrderStatus)`: The current status of the order.
--   `refundAddress (address)`: The designated refund address.
--   `createdAt (uint256)`: Timestamp of creation.
--   `expiresAt (uint256)`: Timestamp of expiration.
--   `acceptedProposalId (bytes32)`: ID of the accepted proposal (if any).
--   `fulfilledByProvider (address)`: Address of the provider who fulfilled the order (if any).
-
+##### `external view getOrder(bytes32 _orderId) returns (Order memory)`
+**Description**: Retrieves details for a specific order.
 **Request**:
 ```json
 {
-  "_orderId": "0x1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b"
+  "_orderId": "0xUniqueOrderId"
 }
 ```
-
 **Response**:
 ```json
 {
-  "orderId": "0x1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b",
-  "user": "0xABCDEF1234567890ABCDEF1234567890ABCDEF12",
-  "token": "0x1234567890abcdef1234567890abcdef12345678",
+  "orderId": "0xUniqueOrderId",
+  "user": "0xUserAddress",
+  "token": "0xERC20TokenAddress",
   "amount": "1000000000000000000",
-  "tier": 0, // SMALL
-  "status": 0, // PENDING
-  "refundAddress": "0xABCDEF1234567890ABCDEF1234567890ABCDEF12",
+  "tier": 0, // SMALL (0), MEDIUM (1), LARGE (2)
+  "status": 0, // PENDING (0), PROPOSED (1), ACCEPTED (2), FULFILLED (3), REFUNDED (4), CANCELLED (5)
+  "refundAddress": "0xUserRefundAddress",
   "createdAt": 1678886400,
   "expiresAt": 1678890000,
-  "acceptedProposalId": "0x0000000000000000000000000000000000000000000000000000000000000000",
-  "fulfilledByProvider": "0x0000000000000000000000000000000000000000"
+  "acceptedProposalId": "0xAcceptedProposalId", // 0x0 if not accepted
+  "fulfilledByProvider": "0xProviderAddress" // 0x0 if not fulfilled
 }
 ```
-
 **Errors**:
--   `OrderNotFound`: The provided `_orderId` does not correspond to an existing order.
+- `OrderNotFound`: Provided `_orderId` does not correspond to an existing order.
 
-#### `createProposal(bytes32 _orderId, address _provider, uint64 _proposedFeeBps)`
-**Description**:
-Creates a settlement proposal for a given order to a specific provider. Only callable by the aggregator.
-
-**Parameters**:
--   `_orderId (bytes32)`: The ID of the order to settle.
--   `_provider (address)`: The address of the provider who will fulfill the order.
--   `_proposedFeeBps (uint64)`: The fee (in basis points) proposed to be paid to the provider.
-
-**Return Value**:
-`(bytes32)`: The unique `proposalId` generated for the new proposal.
-
+##### `external createProposal(bytes32 _orderId, address _provider, uint64 _proposedFeeBps) returns (bytes32 proposalId)`
+**Description**: Creates a settlement proposal for a given order from a specific provider. Restricted to `onlyAggregator`.
 **Request**:
 ```json
 {
-  "_orderId": "0x1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b",
-  "_provider": "0x0987654321FEDCBA0987654321FEDCBA098765",
+  "_orderId": "0xUniqueOrderId",
+  "_provider": "0xProviderAddress",
   "_proposedFeeBps": 200 // 0.2%
 }
 ```
-
 **Response**:
 ```json
 {
-  "proposalId": "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
+  "proposalId": "0xUniqueProposalId"
 }
 ```
-
+**Events Emitted**: `SettlementProposalCreated`
 **Errors**:
--   `OnlyAggregator`: Caller is not the aggregator address.
--   `OrderNotFound`: The provided `_orderId` does not correspond to an existing order.
--   `OrderNotPending`: The order is not in `PENDING` status.
--   `OrderExpired`: The order has already expired.
--   `ProviderIntentNotActive`: The chosen provider does not have an active intent.
--   `InsufficientCapacity`: The chosen provider does not have enough available capacity for the order amount.
--   `InvalidFee`: The proposed fee is outside the provider's registered `minFeeBps` and `maxFeeBps` range.
+- `OnlyAggregator`: Caller is not the aggregator.
+- `OrderNotFound`: Provided `_orderId` does not correspond to an existing order.
+- `OrderNotPending`: Order is not in `PENDING` status.
+- `OrderExpired`: Order's expiry time has passed.
+- `ProviderIntentNotActive`: Provider does not have an active intent.
+- `InsufficientCapacity`: Provider's available capacity is less than the order amount.
+- `InvalidFee`: Proposed fee is outside the provider's registered `minFeeBps` and `maxFeeBps`.
 
-#### `acceptProposal(bytes32 _proposalId)`
-**Description**:
-Allows a provider to accept a settlement proposal addressed to them. This changes the status of both the proposal and the associated order to `ACCEPTED`.
-
-**Parameters**:
--   `_proposalId (bytes32)`: The ID of the proposal to accept.
-
+##### `external acceptProposal(bytes32 _proposalId)`
+**Description**: A provider accepts a settlement proposal, marking the order as `ACCEPTED`. Restricted to `onlyProvider`.
 **Request**:
 ```json
 {
-  "_proposalId": "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
+  "_proposalId": "0xUniqueProposalId"
 }
 ```
-
 **Response**:
-`{ "status": "SettlementProposalAcceptedEventEmitted" }`
-
+*   No explicit return value.
+*   State changes: `proposals[_proposalId].status` set to `ACCEPTED`, `orders[proposal.orderId].status` set to `ACCEPTED`, `orders[proposal.orderId].acceptedProposalId`, `orders[proposal.orderId].fulfilledByProvider` are set.
+**Events Emitted**: `SettlementProposalAccepted`
 **Errors**:
--   `NotRegisteredProvider`: Caller is not a registered provider.
--   `Pausable: paused`: Contract is paused.
--   `NotProposalProvider`: Caller is not the provider associated with the proposal.
--   `ProposalNotPending`: The proposal is not in `PENDING` status.
--   `ProposalExpired`: The proposal's deadline has passed.
+- `NotProposalProvider`: Caller is not the provider associated with the proposal.
+- `ProposalNotPending`: Proposal is not in `PENDING` status.
+- `ProposalExpired`: Proposal's deadline has passed.
+- `Pausable: paused`: Contract is paused.
+- `ReentrancyGuard: reentrant call`: Reentrancy detected.
 
-#### `rejectProposal(bytes32 _proposalId, string calldata _reason)`
-**Description**:
-Allows a provider to reject a settlement proposal addressed to them. This changes the status of the proposal to `REJECTED` and updates the provider's reputation.
-
-**Parameters**:
--   `_proposalId (bytes32)`: The ID of the proposal to reject.
--   `_reason (string)`: A brief reason for rejecting the proposal.
-
+##### `external rejectProposal(bytes32 _proposalId, string calldata _reason)`
+**Description**: A provider rejects a settlement proposal. Restricted to `onlyProvider`.
 **Request**:
 ```json
 {
-  "_proposalId": "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+  "_proposalId": "0xUniqueProposalId",
   "_reason": "Capacity unavailable"
 }
 ```
-
 **Response**:
-`{ "status": "SettlementProposalRejectedEventEmitted" }`
-
+*   No explicit return value.
+*   State changes: `proposals[_proposalId].status` set to `REJECTED`, `providerReputation[msg.sender].noShowCount` incremented.
+**Events Emitted**: `SettlementProposalRejected`
 **Errors**:
--   `NotRegisteredProvider`: Caller is not a registered provider.
--   `NotProposalProvider`: Caller is not the provider associated with the proposal.
--   `ProposalNotPending`: The proposal is not in `PENDING` status.
+- `NotProposalProvider`: Caller is not the provider associated with the proposal.
+- `ProposalNotPending`: Proposal is not in `PENDING` status.
+- `ReentrancyGuard: reentrant call`: Reentrancy detected.
 
-#### `timeoutProposal(bytes32 _proposalId)`
-**Description**:
-Marks a pending proposal as `TIMEOUT` if its deadline has passed. Only callable by the aggregator.
-
-**Parameters**:
--   `_proposalId (bytes32)`: The ID of the proposal to timeout.
-
+##### `external timeoutProposal(bytes32 _proposalId)`
+**Description**: Marks a proposal as `TIMEOUT` if its deadline has passed without acceptance. Restricted to `onlyAggregator`.
 **Request**:
 ```json
 {
-  "_proposalId": "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
+  "_proposalId": "0xUniqueProposalId"
 }
 ```
-
 **Response**:
-`{ "status": "SettlementProposalTimeoutEventEmitted" }`
-
+*   No explicit return value.
+*   State changes: `proposals[_proposalId].status` set to `TIMEOUT`.
+**Events Emitted**: `SettlementProposalTimeout`
 **Errors**:
--   `OnlyAggregator`: Caller is not the aggregator address.
--   `ProposalNotPending`: The proposal is not in `PENDING` status.
--   `ProposalNotExpired`: The proposal's deadline has not yet passed.
+- `OnlyAggregator`: Caller is not the aggregator.
+- `ProposalNotPending`: Proposal is not in `PENDING` status.
+- `ProposalNotExpired`: Proposal's deadline has not yet passed.
 
-#### `getProposal(bytes32 _proposalId)`
-**Description**:
-Retrieves the details of a specific settlement proposal.
-
-**Parameters**:
--   `_proposalId (bytes32)`: The unique identifier of the proposal.
-
-**Return Value**:
-`(SettlementProposal memory)`: A struct containing:
--   `proposalId (bytes32)`: The unique identifier of the proposal.
--   `orderId (bytes32)`: The ID of the associated order.
--   `provider (address)`: The provider's address.
--   `proposedAmount (uint256)`: The amount proposed for settlement.
--   `proposedFeeBps (uint64)`: The proposed fee in BPS.
--   `proposedAt (uint256)`: Timestamp of proposal creation.
--   `proposalDeadline (uint256)`: Deadline for provider acceptance.
--   `status (ProposalStatus)`: The current status of the proposal.
-
+##### `external view getProposal(bytes32 _proposalId) returns (SettlementProposal memory)`
+**Description**: Retrieves details for a specific settlement proposal.
 **Request**:
 ```json
 {
-  "_proposalId": "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
+  "_proposalId": "0xUniqueProposalId"
 }
 ```
-
 **Response**:
 ```json
 {
-  "proposalId": "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
-  "orderId": "0x1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b",
-  "provider": "0x0987654321FEDCBA0987654321FEDCBA098765",
+  "proposalId": "0xUniqueProposalId",
+  "orderId": "0xUniqueOrderId",
+  "provider": "0xProviderAddress",
   "proposedAmount": "1000000000000000000",
   "proposedFeeBps": 200,
-  "proposedAt": 1678890000,
-  "proposalDeadline": 1678890030,
-  "status": 1 // ACCEPTED
+  "proposedAt": 1678886400,
+  "proposalDeadline": 1678886430,
+  "status": 1 // PENDING (0), ACCEPTED (1), REJECTED (2), TIMEOUT (3), CANCELLED (4)
 }
 ```
 
-**Errors**:
--   None (returns default struct if proposal not found)
-
-#### `executeSettlement(bytes32 _proposalId)`
-**Description**:
-Executes the settlement of an order based on an accepted proposal. Transfers protocol fees to the treasury and the remaining amount to the provider. Updates order status and provider reputation. Only callable by the aggregator.
-
-**Parameters**:
--   `_proposalId (bytes32)`: The ID of the accepted proposal to execute.
-
+##### `external executeSettlement(bytes32 _proposalId)`
+**Description**: Executes the settlement of an `ACCEPTED` proposal, distributing funds to the provider and treasury. Restricted to `onlyAggregator`.
 **Request**:
 ```json
 {
-  "_proposalId": "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
+  "_proposalId": "0xUniqueProposalId"
 }
 ```
-
 **Response**:
-`{ "status": "SettlementExecutedEventEmitted" }`
-
+*   No explicit return value.
+*   State changes: `proposalExecuted[_proposalId]` set to `true`, `orders[proposal.orderId].status` set to `FULFILLED`, `providerReputation` updated. ERC20 tokens are transferred to `treasuryAddress` and `proposal.provider`.
+**Events Emitted**: `SettlementExecuted`, `ProviderReputationUpdated`
 **Errors**:
--   `OnlyAggregator`: Caller is not the aggregator address.
--   `ProposalNotAccepted`: The proposal is not in `ACCEPTED` status.
--   `AlreadyExecuted`: The proposal has already been executed.
--   `OrderNotAccepted`: The associated order is not in `ACCEPTED` status.
--   `ERC20: transfer amount exceeds balance` or `ERC20: transfer failed`: Insufficient balance in the contract for fees or provider payment.
+- `OnlyAggregator`: Caller is not the aggregator.
+- `ProposalNotAccepted`: Proposal is not in `ACCEPTED` status.
+- `AlreadyExecuted`: Proposal has already been executed.
+- `OrderNotAccepted`: Order is not in `ACCEPTED` status.
+- `ReentrancyGuard: reentrant call`: Reentrancy detected.
+- `ERC20: transfer failed`: Token transfer to treasury or provider failed.
 
-#### `refundOrder(bytes32 _orderId)`
-**Description**:
-Refunds an order if it has not been fulfilled and has expired. Transfers the full order amount back to the `refundAddress`. Only callable by the aggregator.
-
-**Parameters**:
--   `_orderId (bytes32)`: The ID of the order to refund.
-
+##### `external refundOrder(bytes32 _orderId)`
+**Description**: Refunds an order if it has not been fulfilled and has expired. Restricted to `onlyAggregator`.
 **Request**:
 ```json
 {
-  "_orderId": "0x1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b"
+  "_orderId": "0xUniqueOrderId"
 }
 ```
-
 **Response**:
-`{ "status": "OrderRefundedEventEmitted" }`
-
+*   No explicit return value.
+*   State changes: `orders[_orderId].status` set to `REFUNDED`. ERC20 tokens are transferred to `order.refundAddress`.
+**Events Emitted**: `OrderRefunded`
 **Errors**:
--   `OnlyAggregator`: Caller is not the aggregator address.
--   `OrderNotFound`: The provided `_orderId` does not correspond to an existing order.
--   `OrderFulfilled`: The order has already been fulfilled.
--   `AlreadyRefunded`: The order has already been refunded.
--   `OrderNotExpired`: The order's expiry time has not yet passed.
--   `ERC20: transfer failed`: Failed to transfer tokens to the refund address.
+- `OnlyAggregator`: Caller is not the aggregator.
+- `OrderNotFound`: Provided `_orderId` does not correspond to an existing order.
+- `OrderFulfilled`: Order has already been fulfilled.
+- `AlreadyRefunded`: Order has already been refunded.
+- `OrderNotExpired`: Order's expiry time has not passed.
+- `ReentrancyGuard: reentrant call`: Reentrancy detected.
 
-#### `requestRefund(bytes32 _orderId)`
-**Description**:
-Allows the order creator to request a refund for an unfulfilled and expired order. Marks the order as `CANCELLED` and transfers funds to the `refundAddress`.
-
-**Parameters**:
--   `_orderId (bytes32)`: The ID of the order to refund.
-
+##### `external requestRefund(bytes32 _orderId)`
+**Description**: Allows the order creator to request a refund if the order has not been fulfilled and has expired.
 **Request**:
 ```json
 {
-  "_orderId": "0x1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b"
+  "_orderId": "0xUniqueOrderId"
 }
 ```
-
 **Response**:
-`{ "status": "OrderRefundedEventEmitted" }`
-
+*   No explicit return value.
+*   State changes: `orders[_orderId].status` set to `CANCELLED`. ERC20 tokens are transferred to `order.refundAddress`.
+**Events Emitted**: `OrderRefunded`
 **Errors**:
--   `OrderNotFound`: The provided `_orderId` does not correspond to an existing order.
--   `NotOrderCreator`: Caller is not the creator of the order.
--   `CannotRefund`: The order's status is `FULFILLED` or `REFUNDED`, or has an accepted proposal.
--   `OrderNotExpired`: The order's expiry time has not yet passed.
--   `ERC20: transfer failed`: Failed to transfer tokens to the refund address.
+- `OrderNotFound`: Provided `_orderId` does not correspond to an existing order.
+- `NotOrderCreator`: Caller is not the creator of the order.
+- `CannotRefund`: Order is in a status that cannot be refunded (e.g., `ACCEPTED` or `FULFILLED`).
+- `OrderNotExpired`: Order's expiry time has not passed.
+- `ReentrancyGuard: reentrant call`: Reentrancy detected.
 
-#### `flagFraudulent(address _provider)`
-**Description**:
-Flags a provider as fraudulent, deactivating their intent. Only callable by the aggregator.
-
-**Parameters**:
--   `_provider (address)`: The address of the provider to flag.
-
+##### `external flagFraudulent(address _provider)`
+**Description**: Flags a provider as fraudulent, disabling their intent. Restricted to `onlyAggregator`.
 **Request**:
 ```json
 {
-  "_provider": "0x0987654321FEDCBA0987654321FEDCBA098765"
+  "_provider": "0xProviderAddress"
 }
 ```
-
 **Response**:
-`{ "status": "ProviderFraudFlaggedEventEmitted" }`
-
+*   No explicit return value.
+*   State changes: `providerReputation[_provider].isFraudulent` set to `true`, `providerIntents[_provider].isActive` set to `false`.
+**Events Emitted**: `ProviderFraudFlagged`
 **Errors**:
--   `OnlyAggregator`: Caller is not the aggregator address.
--   `ProviderNotFound`: The provided provider address is not registered.
+- `OnlyAggregator`: Caller is not the aggregator.
+- `ProviderNotFound`: Provided `_provider` address is not a registered provider.
 
-#### `blacklistProvider(address _provider, string calldata _reason)`
-**Description**:
-Blacklists a provider, deactivating their intent and preventing them from registering new intents. Only callable by the contract owner.
-
-**Parameters**:
--   `_provider (address)`: The address of the provider to blacklist.
--   `_reason (string)`: A brief reason for blacklisting.
-
+##### `external blacklistProvider(address _provider, string calldata _reason)`
+**Description**: Blacklists a provider, disabling their intent. Restricted to `onlyOwner`.
 **Request**:
 ```json
 {
-  "_provider": "0x0987654321FEDCBA0987654321FEDCBA098765",
-  "_reason": "Repeated failed settlements"
+  "_provider": "0xProviderAddress",
+  "_reason": "Repeated malicious behavior"
+}
 }
 ```
-
 **Response**:
-`{ "status": "ProviderBlacklistedEventEmitted" }`
-
+*   No explicit return value.
+*   State changes: `providerReputation[_provider].isBlacklisted` set to `true`, `providerIntents[_provider].isActive` set to `false`.
+**Events Emitted**: `ProviderBlacklisted`
 **Errors**:
--   `Ownable: caller is not the owner`: Caller is not the contract owner.
+- `Ownable2Step: caller is not the owner`: Caller is not the contract owner.
 
-#### `getProviderReputation(address _provider)`
-**Description**:
-Retrieves the reputation metrics for a specific provider.
-
-**Parameters**:
--   `_provider (address)`: The address of the provider.
-
-**Return Value**:
-`(ProviderReputation memory)`: A struct containing:
--   `provider (address)`: The provider's address.
--   `totalOrders (uint256)`: Total orders processed.
--   `successfulOrders (uint256)`: Count of successfully fulfilled orders.
--   `failedOrders (uint256)`: Count of failed orders.
--   `noShowCount (uint256)`: Count of proposals rejected or timed out by the provider.
--   `totalSettlementTime (uint256)`: Total time taken for successful settlements.
--   `lastUpdated (uint256)`: Timestamp of last reputation update.
--   `isFraudulent (bool)`: Whether the provider is flagged as fraudulent.
--   `isBlacklisted (bool)`: Whether the provider is blacklisted.
-
+##### `external view getProviderReputation(address _provider) returns (ProviderReputation memory)`
+**Description**: Retrieves the reputation metrics for a specific provider.
 **Request**:
 ```json
 {
-  "_provider": "0x0987654321FEDCBA0987654321FEDCBA098765"
+  "_provider": "0xProviderAddress"
 }
 ```
-
 **Response**:
 ```json
 {
-  "provider": "0x0987654321FEDCBA0987654321FEDCBA098765",
+  "provider": "0xProviderAddress",
   "totalOrders": 10,
   "successfulOrders": 8,
-  "failedOrders": 1,
+  "failedOrders": 2,
   "noShowCount": 1,
-  "totalSettlementTime": 1200,
-  "lastUpdated": 1678890100,
+  "totalSettlementTime": 3600,
+  "lastUpdated": 1678886400,
   "isFraudulent": false,
   "isBlacklisted": false
 }
 ```
 
-**Errors**:
--   None (returns default struct if provider not found)
-
-#### `getRegisteredProviders()`
-**Description**:
-Returns an array of all currently registered provider addresses.
-
-**Parameters**:
-None
-
-**Return Value**:
-`(address[] memory)`: An array of provider addresses.
-
-**Request**:
-`{}`
-
+##### `external view getRegisteredProviders() returns (address[] memory)`
+**Description**: Returns a list of all currently registered provider addresses.
+**Request**: No parameters.
 **Response**:
 ```json
 {
-  "providers": [
-    "0x0987654321FEDCBA0987654321FEDCBA098765",
-    "0x112233445566778899AABBCCDDEEFF0011223344"
-  ]
+  "providers": ["0xProvider1Address", "0xProvider2Address"]
 }
 ```
 
-**Errors**:
--   None
-
-#### `getActiveOrders()`
-**Description**:
-Returns an array of `orderId` for all currently active (pending, proposed, accepted) orders.
-
-**Parameters**:
-None
-
-**Return Value**:
-`(bytes32[] memory)`: An array of active order IDs.
-
-**Request**:
-`{}`
-
+##### `external view getActiveOrders() returns (bytes32[] memory)`
+**Description**: Returns a list of all currently active order IDs.
+**Request**: No parameters.
 **Response**:
 ```json
 {
-  "orderIds": [
-    "0x1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b",
-    "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
-  ]
+  "orderIds": ["0xOrderId1", "0xOrderId2"]
 }
 ```
 
-**Errors**:
--   None
-
-#### `getUserNonce(address _user)`
-**Description**:
-Retrieves the nonce for a specific user, used internally for generating unique `orderId`s and preventing replay attacks.
-
-**Parameters**:
--   `_user (address)`: The address of the user.
-
-**Return Value**:
-`(uint256)`: The current nonce for the user.
-
+##### `external view getUserNonce(address _user) returns (uint256)`
+**Description**: Retrieves the nonce for a given user, used for generating unique order IDs.
 **Request**:
 ```json
 {
-  "_user": "0xABCDEF1234567890ABCDEF1234567890ABCDEF12"
+  "_user": "0xUserAddress"
 }
 ```
-
 **Response**:
 ```json
 {
@@ -925,61 +1238,120 @@ Retrieves the nonce for a specific user, used internally for generating unique `
 }
 ```
 
-**Errors**:
--   None
-
-#### `emergencyWithdraw(address _token)`
-**Description**:
-Allows the contract owner to withdraw any accidentally sent or stuck ERC-20 tokens from the contract to the treasury address.
-
-**Parameters**:
--   `_token (address)`: The address of the ERC-20 token to withdraw.
-
+##### `external emergencyWithdraw(address _token)`
+**Description**: Allows the contract owner to withdraw any balance of a specified ERC20 token held by the contract to the treasury. Restricted to `onlyOwner`.
 **Request**:
 ```json
 {
-  "_token": "0x1234567890abcdef1234567890abcdef12345678"
+  "_token": "0xERC20TokenAddress"
 }
 ```
-
 **Response**:
-`{ "status": "Emergency Withdrawal Successful" }`
-
+*   No explicit return value.
+*   State changes: ERC20 token balance of the contract is transferred to `treasuryAddress`.
 **Errors**:
--   `Ownable: caller is not the owner`: Caller is not the contract owner.
--   `NoBalance`: There is no balance of the specified token in the contract.
--   `ERC20: transfer failed`: Failed to transfer tokens to the treasury.
+- `Ownable2Step: caller is not the owner`: Caller is not the contract owner.
+- `NoBalance`: No balance of the specified token is held by the contract.
+- `ReentrancyGuard: reentrant call`: Reentrancy detected.
+
+##### Errors:
+- `InvalidTreasuryAddress`: Provided zero address for treasury during initialization.
+- `InvalidAggregatorAddress`: Provided zero address for aggregator during initialization.
+- `InvalidToken`: Provided zero address for a token.
+- `InvalidAddress`: A zero address was provided.
+- `FeeTooHigh`: Protocol fee exceeds 5% or provider's `maxFeeBps` exceeds 10%.
+- `InvalidLimits`: Invalid tier limits provided (`_smallLimit` is zero or `_mediumLimit` not greater than `_smallLimit`).
+- `InvalidWindow`: Order expiry window is zero.
+- `InvalidTimeout`: Proposal timeout is zero.
+- `InvalidAmount`: Amount is zero where a positive amount is required.
+- `InvalidFees`: Provider's `minFeeBps` is greater than `maxFeeBps`.
+- `InvalidCommitmentWindow`: Provider's commitment window is zero.
+- `ProviderBlacklisted`: The provider is blacklisted.
+- `NotRegisteredProvider`: Caller is not a registered provider.
+- `NoActiveIntent`: Provider has no active intent.
+- `IntentNotActive`: Provider intent is not active.
+- `IntentNotExpired`: Provider intent or order has not expired.
+- `InsufficientCapacity`: Provider's available capacity is insufficient.
+- `OrderNotFound`: The specified order ID does not exist.
+- `InvalidRefundAddress`: Provided zero address for refund address.
+- `TokenNotSupported`: The specified ERC20 token is not supported.
+- `OrderNotPending`: Order status is not `PENDING`.
+- `OrderExpired`: Order's expiry time has passed.
+- `ProviderIntentNotActive`: Provider's intent is not active.
+- `InvalidFee`: Proposed fee is outside the provider's valid range.
+- `NotProposalProvider`: Caller is not the provider associated with the proposal.
+- `ProposalNotPending`: Proposal status is not `PENDING`.
+- `ProposalExpired`: Proposal's deadline has passed.
+- `OrderFulfilled`: Order has already been fulfilled.
+- `AlreadyExecuted`: Proposal has already been executed.
+- `OrderNotAccepted`: Order status is not `ACCEPTED`.
+- `AlreadyRefunded`: Order has already been refunded.
+- `NotOrderCreator`: Caller is not the creator of the order.
+- `CannotRefund`: Order cannot be refunded in its current state.
+- `ProviderNotFound`: The specified provider is not registered.
+- `NoBalance`: Contract has no balance of the specified token for emergency withdrawal.
+
+## Usage
+The PayNode protocol is designed to be integrated into off-chain applications (e.g., web platforms, mobile apps) that interact with the smart contracts.
+
+1.  **Deployment**:
+    Deploy the contracts in the following order to your chosen EVM network:
+    *   `PayNodeAccessManager` (Proxy-based UUPS upgradeable)
+    *   `PayNodeAdmin` (Timelock Controller)
+    *   `PGateway` (Implementation)
+    *   `ERC1967Proxy` (Points to `PGateway` implementation)
+    *   Call `initialize()` on the `PayNodeAccessManager` and `PGateway` proxy addresses with the required parameters.
+    *   Transfer `DEFAULT_ADMIN_ROLE` from `PayNodeAccessManager` to `PayNodeAdmin`.
+    *   Transfer ownership of the `PGateway` proxy to `PayNodeAdmin` (if applicable for upgrade control).
+
+2.  **Configuration**:
+    *   The contract owner (initially the deployer, then typically `PayNodeAdmin` or a designated governance address) must use `setSupportedToken` on `PGateway` to whitelist ERC20 tokens for use in orders.
+    *   Configure `setProtocolFee`, `setTierLimits`, `setOrderExpiryWindow`, `setProposalTimeout` on `PGateway` as needed.
+
+3.  **Provider Workflow**:
+    *   Providers call `PGateway.registerIntent` to declare their capacity, supported currency, fee ranges, and commitment window.
+    *   Providers can update their intent using `PGateway.updateIntent`.
+
+4.  **User Workflow**:
+    *   Users approve the `PGateway` contract to spend their ERC20 tokens for the order amount.
+    *   Users call `PGateway.createOrder` with the token, amount, and a refund address. This transfers the tokens to the `PGateway` contract (escrow).
+
+5.  **Aggregator Workflow (Off-chain Service)**:
+    *   The off-chain aggregator monitors new orders (via `OrderCreated` events) and active provider intents.
+    *   It calls `PGateway.createProposal` to send settlement proposals to suitable providers.
+    *   It monitors `SettlementProposalAccepted`, `SettlementProposalRejected`, `SettlementProposalTimeout` events.
+    *   Upon `SettlementProposalAccepted`, the aggregator calls `PGateway.executeSettlement` to finalize the transaction, transferring funds from escrow to the provider and protocol treasury.
+    *   If orders or proposals expire without settlement, the aggregator can call `PGateway.refundOrder` to return funds to the user.
+
+6.  **Admin/Operator Workflow**:
+    *   Admins manage system flags (e.g., `TRADING_ENABLED`) and global pause/unpause state via `PayNodeAccessManager`.
+    *   Operators manage the blacklist via `PayNodeAccessManager.setBlacklistStatus` or `batchUpdateBlacklist`.
+    *   Admins schedule and execute contract upgrades and critical role changes via `PayNodeAdmin`, respecting timelocks.
 
 ## Technologies Used
-| Technology          | Description                                         |
-| :------------------ | :-------------------------------------------------- |
-| Solidity            | Smart contract programming language                 |
-| Foundry             | Fast, portable and modular toolkit for Ethereum application development |
-| OpenZeppelin Contracts | Standard, tested, and audited smart contract libraries |
-| ERC-20              | Standard for fungible tokens on Ethereum            |
+
+| Technology         | Description                                                          | Link                                                       |
+| :----------------- | :------------------------------------------------------------------- | :--------------------------------------------------------- |
+| **Solidity**       | Smart contract programming language                                  | [Solidity](https://soliditylang.org/)                      |
+| **Foundry**        | Ethereum development framework (Forge, Anvil, Chisel)                | [Foundry](https://getfoundry.sh/)                          |
+| **OpenZeppelin**   | Library for secure smart contract development (upgradeable contracts, access control, pausable) | [OpenZeppelin](https://openzeppelin.com/contracts/)        |
+| **Chainlink**      | Decentralized oracle network (Automation for automated upkeep)       | [Chainlink Automation](https://chain.link/automation)      |
 
 ## Contributing
-We welcome contributions to the PayNode Protocol! If you're interested in improving the project, please follow these guidelines:
+Contributions to the PayNode protocol are welcome. Please follow these guidelines:
 
-*   **Fork the repository:** Start by forking the official repository to your GitHub account.
-*   **Create a new branch:** For each feature or bug fix, create a new branch from `main` with a descriptive name (e.g., `feature/add-reputation-logic`, `bugfix/fix-overflow-error`).
-*   **Write clean code:** Adhere to Solidity best practices and maintain consistent coding style.
-*   **Add tests:** Ensure your changes are thoroughly tested using Foundry's testing framework.
-*   **Document your work:** Update relevant comments and documentation for new functions or significant changes.
-*   **Open a Pull Request:** Submit your changes via a pull request to the `main` branch, explaining your changes and their purpose.
+*   **Fork the repository** and clone it to your local machine.
+*   **Create a new branch** for your feature or bug fix: `git checkout -b feature/your-feature-name`.
+*   **Implement your changes**, ensuring that your code adheres to existing style guides.
+*   **Write comprehensive tests** for your changes and ensure all existing tests pass: `forge test`.
+*   **Open a Pull Request** (PR) to the `main` branch. Provide a clear and detailed description of your changes in the PR.
+*   **Ensure CI/CD checks pass** before requesting a review.
 
-## License
-This project is licensed under the MIT License.
-
-## Author
-*   **Your Name/Alias**
-    *   LinkedIn: [YourLinkedIn](https://linkedin.com/in/yourprofile)
-    *   Twitter: [@YourTwitter](https://twitter.com/yourprofile)
+## Author Info
+*   **Olujimi**
+    *   LinkedIn: [placeholder]
+    *   Twitter: [placeholder]
 
 ---
 
-[![Solidity](https://img.shields.io/badge/Solidity-^0.8.18-363636?logo=solidity)](https://soliditylang.org/)
-[![Foundry](https://img.shields.io/badge/Foundry-darkgray?logo=foundry&logoColor=white)](https://getfoundry.sh/)
-[![OpenZeppelin](https://img.shields.io/badge/OpenZeppelin-Contracts-593E70?logo=openzeppelin)](https://openzeppelin.com/contracts/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Readme was generated by Dokugen](https://img.shields.io/badge/Readme%20was%20generated%20by-Dokugen-brightgreen)](https://www.npmjs.com/package/dokugen)

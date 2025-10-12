@@ -8,10 +8,10 @@ import '@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol';
 import '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 
 /**
- * @title PayNode
+ * @title PayNode Gateway
  * @notice Non-custodial payment aggregator with parallel settlement and provider intent registry
  */
-contract PayNode is 
+contract PGateWay is 
     Initializable,
     PausableUpgradeable,
     Ownable2StepUpgradeable,
