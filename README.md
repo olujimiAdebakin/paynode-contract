@@ -9,39 +9,76 @@ Core Innovation: Providers pre-register their available capacity (intent), elimi
 
 System Architecture
 
-┌─────────────────────────────────────────────────────────┐
-│                    AccessManager                         │
-│  • Admin role control                                    │
-│  • Pause/Unpause permissions                            │
-│  • Blacklist management                                 │
-│  • Role-based access control (RBAC)                     │
-└─────────────────────────────────────────────────────────┘
-         ↓
-┌─────────────────────────────────────────────────────────┐
-│                  TimelockAdmin                          │
-│  • Upgrade scheduling (48h delay)                       │
-│  • Proposal queuing                                     │
-│  • Execution after timelock                            │
-│  • Cancel malicious upgrades                           │
-└─────────────────────────────────────────────────────────┘
-         ↓
-┌─────────────────────────────────────────────────────────┐
-│            PayNodeGatewaySettings                       │
-│  • Configuration parameters                             │
-│  • Token whitelist                                      │
-│  • Fee settings                                         │
-│  • Tier limits (SMALL/MEDIUM/LARGE)                    │
-└─────────────────────────────────────────────────────────┘
-         ↓
-┌─────────────────────────────────────────────────────────┐
-│             PayNodeGateway (Proxy)                       │
-│  • Order creation & management                          │
-│  • Provider intent registry                             │
-│  • Settlement proposals (parallel)                      │
-│  • Settlement execution                                │
-│  • Refund handling                                      │
-│  • Reputation tracking                                 │
-└─────────────────────────────────────────────────────────┘
+<svg viewBox="0 0 1000 1200" xmlns="http://www.w3.org/2000/svg">
+  <!-- Define styles -->
+  <defs>
+    <style>
+      .container { fill: #f8f9fa; stroke: #2563eb; stroke-width: 2; }
+      .title { font-size: 18px; font-weight: bold; fill: #1e40af; }
+      .subtitle { font-size: 14px; fill: #475569; }
+      .arrow { stroke: #2563eb; stroke-width: 2; fill: none; marker-end: url(#arrowhead); }
+      .label { font-size: 12px; fill: #64748b; }
+      text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+    </style>
+    <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <polygon points="0 0, 10 3, 0 6" fill="#2563eb" />
+    </marker>
+  </defs>
+
+  <!-- Layer 1: AccessManager -->
+  <rect x="75" y="50" width="850" height="140" rx="8" class="container"/>
+  <text x="500" y="85" text-anchor="middle" class="title">AccessManager</text>
+  <text x="100" y="115" class="subtitle">•  Admin role control</text>
+  <text x="100" y="140" class="subtitle">•  Pause/Unpause permissions</text>
+  <text x="550" y="115" class="subtitle">•  Blacklist management</text>
+  <text x="550" y="140" class="subtitle">•  Role-based access control (RBAC)</text>
+
+  <!-- Arrow 1 -->
+  <path d="M 500 190 L 500 240" class="arrow"/>
+
+  <!-- Layer 2: TimelockAdmin -->
+  <rect x="75" y="240" width="850" height="140" rx="8" class="container"/>
+  <text x="500" y="275" text-anchor="middle" class="title">TimelockAdmin</text>
+  <text x="100" y="305" class="subtitle">•  Upgrade scheduling (48h delay)</text>
+  <text x="100" y="330" class="subtitle">•  Proposal queuing</text>
+  <text x="550" y="305" class="subtitle">•  Execution after timelock</text>
+  <text x="550" y="330" class="subtitle">•  Cancel malicious upgrades</text>
+
+  <!-- Arrow 2 -->
+  <path d="M 500 380 L 500 430" class="arrow"/>
+
+  <!-- Layer 3: PayNodeGatewaySettings -->
+  <rect x="75" y="430" width="850" height="140" rx="8" class="container"/>
+  <text x="500" y="465" text-anchor="middle" class="title">PayNodeGatewaySettings</text>
+  <text x="100" y="495" class="subtitle">•  Configuration parameters</text>
+  <text x="100" y="520" class="subtitle">•  Token whitelist</text>
+  <text x="550" y="495" class="subtitle">•  Fee settings</text>
+  <text x="550" y="520" class="subtitle">•  Tier limits (SMALL/MEDIUM/LARGE)</text>
+
+  <!-- Arrow 3 -->
+  <path d="M 500 570 L 500 620" class="arrow"/>
+
+  <!-- Layer 4: PayNodeGateway -->
+  <rect x="75" y="620" width="850" height="160" rx="8" class="container" style="fill: #eff6ff;"/>
+  <text x="500" y="660" text-anchor="middle" class="title">PayNodeGateway (Proxy)</text>
+  <text x="100" y="690" class="subtitle">•  Order creation & management</text>
+  <text x="100" y="715" class="subtitle">•  Provider intent registry</text>
+  <text x="100" y="740" class="subtitle">•  Settlement execution</text>
+  <text x="550" y="690" class="subtitle">•  Settlement proposals (parallel)</text>
+  <text x="550" y="715" class="subtitle">•  Refund handling</text>
+  <text x="550" y="740" class="subtitle">•  Reputation tracking</text>
+
+  <!-- Bottom label -->
+  <text x="500" y="830" text-anchor="middle" font-size="13" fill="#64748b" font-weight="500">Non-Custodial • Parallel Settlement • Role-Based Access • Timelocked Upgrades</text>
+
+  <!-- Side annotations -->
+  <g opacity="0.7">
+    <text x="950" y="120" font-size="11" fill="#94a3b8">Permissions</text>
+    <text x="950" y="310" font-size="11" fill="#94a3b8">Governance</text>
+    <text x="950" y="500" font-size="11" fill="#94a3b8">Configuration</text>
+    <text x="950" y="700" font-size="11" fill="#94a3b8">Core Logic</text>
+  </g>
+</svg>─┘
 
 ## Features
 -   **Role-Based Access Control (RBAC)**: Centralized permission management via `PayNodeAccessManager` with distinct roles for administrators, operators, and platform services.
