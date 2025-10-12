@@ -231,20 +231,19 @@ Order Created
          └─────────────────┘         └──────────────────┘
 ```
 
+```mermaid
 graph TD
     A["🔐 AccessManager<br/>Permissions Layer<br/>────────────────<br/>• Admin role control<br/>• Pause/Unpause<br/>• Blacklist management<br/>• RBAC"] 
-    
     B["⏱️ TimelockAdmin<br/>Governance Layer<br/>────────────────<br/>• Upgrade scheduling<br/>• 48h delay<br/>• Proposal queuing<br/>• Cancel malicious"]
-    
     C["⚙️ PayNodeGatewaySettings<br/>Configuration Layer<br/>────────────────<br/>• Fee settings<br/>• Token whitelist<br/>• Tier limits<br/>• Protocol params"]
-    
     D["💳 PayNodeGateway<br/>Core Logic Layer<br/>────────────────<br/>• Order creation<br/>• Provider intents<br/>• Parallel proposals<br/>• Settlement exec<br/>• Reputation tracking"]
-    
+
     A --> B
     B --> C
     C --> D
-    
+
     style A fill:#e0e7ff,stroke:#2563eb,stroke-width:2px,color:#1e40af
     style B fill:#e0e7ff,stroke:#2563eb,stroke-width:2px,color:#1e40af
     style C fill:#e0e7ff,stroke:#2563eb,stroke-width:2px,color:#1e40af
     style D fill:#cffafe,stroke:#0891b2,stroke-width:3px,color:#0c4a6e
+```
