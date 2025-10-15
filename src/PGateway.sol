@@ -1,22 +1,32 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.18;
 
-import '@openzeppelin/contracts-upgradeable/security/PausableUpgradeable.sol';
-import '@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol';
-import '@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol';
-import '@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol';
-import '@openzeppelin/contracts/token/ERC20/IERC20.sol';
+import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "./PGatewaySettings.sol";
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+
+import {PayNodeAccessManager} from "./PAccessManager.sol";
 
 /**
  * @title PayNode Gateway
  * @notice Non-custodial payment aggregator with parallel settlement and provider intent registry
+ * @dev Implements upgradeable pattern and uses external contracts for settings and access control
  */
-contract PGateWay is 
+contract PGateway is 
     Initializable,
     PausableUpgradeable,
-    Ownable2StepUpgradeable,
-    ReentrancyGuardUpgradeable 
+    UUPSUpgradeable,
+    ReentrancyGuardUpgradeable,
+    OwnableUpgradeable
 {
+    // Access Manager and Settings
+   PayNodeAccessManager public accessManager;
+    PGatewaySettings public settings;
+    
     /* ========== ENUMS ========== */
     
     enum OrderTier {
@@ -95,17 +105,8 @@ contract PGateWay is
 
     /* ========== STATE VARIABLES ========== */
 
-    // Configuration
-    uint256 public MAX_BPS = 100_000;
-    uint256 public SMALL_TIER_LIMIT = 5_000 * 10**18;
-    uint256 public MEDIUM_TIER_LIMIT = 20_000 * 10**18;
-    uint64 public protocolFeePercent = 500; // 0.5%
-    uint256 public orderExpiryWindow = 1 hours;
-    uint256 public proposalTimeout = 30 seconds;
-
-    // Addresses
-    address public treasuryAddress;
-    address public aggregatorAddress;
+    // Core state variables
+    uint256 private constant MAX_BPS = 100_000;
 
     // Core Mappings
     mapping(bytes32 => Order) public orders;
@@ -235,7 +236,12 @@ contract PGateWay is
     /* ========== MODIFIERS ========== */
 
     modifier onlyAggregator() {
-        require(msg.sender == aggregatorAddress, 'OnlyAggregator');
+        require(msg.sender == settings.aggregatorAddress(), 'OnlyAggregator');
+        _;
+    }
+
+    modifier whenNotBlacklisted() {
+        require(!accessManager.isBlacklisted(msg.sender), 'UserBlacklisted');
         _;
     }
 
@@ -257,31 +263,45 @@ contract PGateWay is
     /* ========== INITIALIZATION ========== */
 
     function initialize(
-        address _treasuryAddress,
-        address _aggregatorAddress
+        address _accessManager,
+        address _settings
     ) external initializer {
-        require(_treasuryAddress != address(0), 'InvalidTreasuryAddress');
-        require(_aggregatorAddress != address(0), 'InvalidAggregatorAddress');
+        require(_accessManager != address(0) && _settings != address(0), 'InvalidAddress');
 
         __Pausable_init();
-        __Ownable2Step_init();
         __ReentrancyGuard_init();
+        __UUPSUpgradeable_init();
+        __Ownable_init();
 
-        treasuryAddress = _treasuryAddress;
-        aggregatorAddress = _aggregatorAddress;
+        accessManager = PAccessManager(_accessManager);
+        settings = PGatewaySettings(_settings);
     }
 
     /* ========== OWNER FUNCTIONS ========== */
 
-    function pause() external onlyOwner {
+    modifier onlyAdmin() {
+        require(accessManager.hasRole(accessManager.DEFAULT_ADMIN_ROLE(), msg.sender), "Not admin");
+        _;
+    }
+
+    // modifier onlyAggregator() {
+    //     require(msg.sender == settings.aggregatorAddress(), "Not aggregator");
+    //     _;
+    // }
+
+    function pause() external onlyAdmin {
         _pause();
     }
 
-    function unpause() external onlyOwner {
+    function unpause() external onlyAdmin {
         _unpause();
     }
 
-    function setSupportedToken(address _token, bool _supported) external onlyOwner {
+    function _authorizeUpgrade(address newImplementation) internal override {
+        require(accessManager.hasRole(accessManager.ADMIN_ROLE(), msg.sender), "Not upgrader");
+    }
+
+    function setSupportedToken(address _token, bool _supported) external onlyAdmin {
         require(_token != address(0), 'InvalidToken');
         supportedTokens[_token] = _supported;
     }
@@ -463,6 +483,7 @@ contract PGateWay is
         whenNotPaused 
         nonReentrant 
         validToken(_token)
+        whenNotBlacklisted
         returns (bytes32 orderId) 
     {
         require(_amount > 0, 'InvalidAmount');
@@ -513,9 +534,9 @@ contract PGateWay is
      * @notice Determine order tier based on amount
      */
     function _determineTier(uint256 _amount) internal view returns (OrderTier) {
-        if (_amount < SMALL_TIER_LIMIT) {
+        if (_amount < settings.SMALL_TIER_LIMIT()) {
             return OrderTier.SMALL;
-        } else if (_amount < MEDIUM_TIER_LIMIT) {
+        } else if (_amount < settings.MEDIUM_TIER_LIMIT()) {
             return OrderTier.MEDIUM;
         } else {
             return OrderTier.LARGE;
@@ -689,12 +710,12 @@ contract PGateWay is
         require(order.status == OrderStatus.ACCEPTED, 'OrderNotAccepted');
 
         // Calculate fees
-        uint256 protocolFee = (proposal.proposedAmount * protocolFeePercent) / MAX_BPS;
+        uint256 protocolFee = (proposal.proposedAmount * settings.protocolFeePercent()) / MAX_BPS;
         uint256 providerFee = (proposal.proposedAmount * proposal.proposedFeeBps) / MAX_BPS;
         uint256 providerAmount = proposal.proposedAmount - protocolFee - providerFee;
 
         // Transfer protocol fee to treasury
-        IERC20(order.token).transfer(treasuryAddress, protocolFee);
+        IERC20(order.token).transfer(settings.treasuryAddress(), protocolFee);
 
         // Transfer amount to provider
         IERC20(order.token).transfer(proposal.provider, providerAmount);
