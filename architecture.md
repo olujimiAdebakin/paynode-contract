@@ -1,347 +1,178 @@
-# PayNode Smart Contract Architecture
+PayNode Smart Contract Architecture
+Overview
 
-## Overview
+PayNode is a non-custodial payment aggregation protocol connecting users to multiple off-chain liquidity providers for intelligent, parallel settlement routing.
 
-PayNode is a **non-custodial payment aggregation protocol** that connects users with multiple liquidity providers for fast, efficient settlements. Instead of routing orders to a single provider (bottleneck), PayNode **sends simultaneous settlement proposals to multiple providers in parallel**—the first to accept executes the order.
+Instead of sending a transaction to a single provider (bottleneck), PayNode broadcasts settlement proposals to eligible providers simultaneously — the first to accept executes the order.
 
-**Core Innovation**: Providers pre-register their available capacity (intent), eliminating stale pricing and enabling intelligent provider selection. The system automatically ranks providers by success rate, speed, uptime, and fees, then races them for each order.
+Core Innovation:
+Providers pre-register their capacity and tier (intent) off-chain. The aggregator routes orders based on provider tier, capacity, and performance scores.
 
-**Architecture**: 
-- **AccessManager** enforces role-based permissions across all contracts
-- **TimelockAdmin** ensures secure upgrades with 48-hour delays
-- **GatewaySettings** centralizes protocol configuration
-- **Gateway** handles order lifecycle, provider intents, parallel proposals, and settlement
+Key Principles:
 
-**Non-Custodial**: User funds stay locked in the contract until a provider accepts and confirms execution. No intermediary ever holds the money.
+⚙️ Modular contract design (Settings, Access, Gateway)
 
----
+🔐 Non-custodial escrow
 
-## System Architecture
+🧠 Tier-based intelligent routing
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                    AccessManager                         │
-│  • Admin role control                                    │
-│  • Pause/Unpause permissions                             │
-│  • Blacklist management                                   │
-│  • Role-based access control (RBAC)                      │
-└─────────────────────────────────────────────────────────┘
-         ↓
-┌─────────────────────────────────────────────────────────┐
-│                  TimelockAdmin                          │
-│  • Upgrade scheduling (48h delay)                       │
-│  • Proposal queuing                                     │
-│  • Execution after timelock                              │
-│  • Cancel malicious upgrades                             │
-└─────────────────────────────────────────────────────────┘
-         ↓
-┌─────────────────────────────────────────────────────────┐
-│            PayNodeGatewaySettings                        │
-│  • Configuration parameters                               │
-│  • Token whitelist                                        │
-│  • Fee settings                                           │
-│  • Tier limits (SMALL/MEDIUM/LARGE)                      │
-└─────────────────────────────────────────────────────────┘
-         ↓
-┌─────────────────────────────────────────────────────────┐
-│             PayNodeGateway (Proxy)                       │
-│  • Order creation & management                            │
-│  • Provider registration & tier tracking                  │
-│  • Settlement proposals (parallel)                        │
-│  • Settlement execution                                    │
-│  • Refund handling                                        │
-│  • Reputation tracking                                     │
-└─────────────────────────────────────────────────────────┘
+⚡ Parallel proposal execution
+
+🧱 Upgradeable and role-secured architecture
+
+System Architecture
+┌───────────────────────────────────────────────────────────┐
+│                      AccessManager                        │
+│ • Role-based permissions (ADMIN, PAUSER, AGGREGATOR)      │
+│ • Provider blacklist management                           │
+│ • Global pause/unpause                                    │
+└───────────────────────────────────────────────────────────┘
+           ↓
+┌───────────────────────────────────────────────────────────┐
+│                     TimelockAdmin                         │
+│ • 48-hour delay for upgrades                              │
+│ • Queued + cancellable proposals                          │
+│ • Prevents instant malicious upgrades                     │
+└───────────────────────────────────────────────────────────┘
+           ↓
+┌───────────────────────────────────────────────────────────┐
+│               PayNodeGatewaySettings                      │
+│ • Protocol config, fees, and tier limits                  │
+│ • Supported token registry                                │
+│ • Treasury + Aggregator addresses                         │
+└───────────────────────────────────────────────────────────┘
+           ↓
+┌───────────────────────────────────────────────────────────┐
+│                   PayNodeGateway (Proxy)                  │
+│ • Order lifecycle management                              │
+│ • Provider registration & tracking                        │
+│ • Proposal creation & execution                           │
+│ • Refunds and reputation updates                          │
+└───────────────────────────────────────────────────────────┘
+
+Contract Layers
+1️⃣ AccessManager (RBAC)
+
+Centralized permission control.
+
+Roles
+
+ADMIN_ROLE       → Full system control
+PAUSER_ROLE      → Pause/unpause
+AGGREGATOR_ROLE  → Manage off-chain routing + proposals
+UPGRADER_ROLE    → Queue upgrades
 
 
----
+Core Functions
 
-## Contract Layers
+grantRole(role, account)
+revokeRole(role, account)
+blacklistProvider(address)
+removeFromBlacklist(address)
+pause()
+unpause()
 
-### 1. AccessManager (RBAC)
+2️⃣ TimelockAdmin (Secure Upgrades)
 
-**Purpose**: Centralized permission control
+Controls all upgrades with enforced delay.
 
-**Roles**:
-- `ADMIN_ROLE` - Full system control
-- `PAUSER_ROLE` - Can pause contracts
-- `AGGREGATOR_ROLE` - Settlement operations
-- `UPGRADER_ROLE` - Can queue upgrades
+Parameters
 
-**Functions**:
-```
-- grantRole(role, account)
-- revokeRole(role, account)
-- hasRole(role, account)
-- blacklistProvider(address)
-- removeFromBlacklist(address)
-- isBlacklisted(address)
-- pause()
-- unpause()
-```
+minDelay = 2 days
+executionWindow = 7 days
 
-**Events**:
-```
-- RoleGranted(role, account)
-- RoleRevoked(role, account)
-- ProviderBlacklisted(provider)
-- ProviderWhitelisted(provider)
-- ContractPaused()
-- ContractUnpaused()
-```
 
----
+Flow
 
-### 2. TimelockAdmin (Upgrade Control)
+scheduleUpgrade(implementation, data)
+→ queued for 48h
+→ executeUpgrade(proposalId)
+→ or cancelUpgrade(proposalId)
 
-**Purpose**: Secure contract upgrades with delay
+3️⃣ PayNodeGatewaySettings (Configuration)
 
-**Parameters**:
-- Minimum delay: 2 days
-- Execution window: 7 days
+Purpose:
+Central hub for configurable parameters.
 
-**Functions**:
-```
-- scheduleUpgrade(implementation, data)
-- executeUpgrade(proposalId)
-- cancelUpgrade(proposalId)
-- getUpgradeStatus(proposalId)
-```
+Core Variables
 
-**States**:
-- PENDING → READY → EXECUTED / CANCELLED
+MAX_BPS = 100_000
+protocolFeePercent (0–5%)
+orderExpiryWindow = 1 hour
+proposalTimeout = 30 seconds
+treasuryAddress
+aggregatorAddress
 
-**Events**:
-```
-- UpgradeScheduled(proposalId, implementation, eta)
-- UpgradeExecuted(proposalId, implementation)
-- UpgradeCancelled(proposalId)
-```
 
----
+Tier Limits
 
-### 3. PayNodeGatewaySettings (Configuration)
+ALPHA (< 3,000)
+BETA (3,000 - 5,000)
+DELTA (5,000 - 7,000)
+OMEGA (7,000 - 10,000)
+TITAN (> 10,000)
 
-**Purpose**: Centralized settings management (inherited by Gateway)
 
-**Configuration Variables**:
-```
-- MAX_BPS = 100,000
-- protocolFeePercent (0-5%)
-- SMALL_TIER_LIMIT (< 5,000)
-- MEDIUM_TIER_LIMIT (5,000 - 20,000)
-- LARGE_TIER_LIMIT (> 20,000)
-- orderExpiryWindow (default 1 hour)
-- proposalTimeout (default 30 seconds)
-- treasuryAddress
-- aggregatorAddress
-```
+Token Management
 
-**Token Management**:
-```
-- supportedTokens mapping
-- addSupportedToken(address)
-- removeSupportedToken(address)
-```
+supportedTokens mapping
+addSupportedToken(address)
+removeSupportedToken(address)
 
-**Functions**:
-```
-- setProtocolFee(uint64)
-- setTierLimits(small, medium)
-- setOrderExpiryWindow(uint256)
-- setProposalTimeout(uint256)
-- setSupportedToken(address, bool)
-```
+4️⃣ PayNodeGateway (Main Contract)
 
-**Events**:
-```
-- ProtocolFeeUpdated(newFee)
-- TierLimitsUpdated(small, medium)
-- SupportedTokenUpdated(token, supported)
-```
+Responsibilities
 
----
+Order lifecycle (create → propose → accept → settle)
 
-### 4. PayNodeGateway (Main Contract)
+Provider registration & tracking
 
-**Purpose**: Core order and settlement execution
+Settlement execution
 
-#### A. Data Structures
+Refunds & reputation scoring
 
-```solidity
-enum OrderTier { SMALL, MEDIUM, LARGE }
-enum OrderStatus { PENDING, PROPOSED, ACCEPTED, FULFILLED, REFUNDED, CANCELLED }
-enum ProposalStatus { PENDING, ACCEPTED, REJECTED, TIMEOUT, CANCELLED }
-
-struct Provider {
-    address provider
-    OrderTier tier            // Self-declared tier
-    string currency
-    uint256 maxCapacity       // Max capacity they can handle
-    uint64 minFeeBps, maxFeeBps
-    uint256 registeredAt
-    bool isActive
-}
-
-struct Order {
-    bytes32 orderId
-    address user
-    address token
-    uint256 amount
-    OrderTier tier
-    OrderStatus status
-    address refundAddress
-    uint256 createdAt, expiresAt
-    bytes32 acceptedProposalId
-    address fulfilledByProvider
-}
-
-struct SettlementProposal {
-    bytes32 proposalId, orderId
-    address provider
-    uint256 proposedAmount
-    uint64 proposedFeeBps
-    uint256 proposedAt, proposalDeadline
-    ProposalStatus status
-}
-
-struct ProviderReputation {
-    address provider
-    uint256 totalOrders, successfulOrders, failedOrders
-    uint256 totalSettlementTime
-    bool isFraudulent, isBlacklisted
-}
-
-```
-
-```
-B. Provider Registration & Intent Flow
-
-Provider Registration
-├─ registerProvider(tier, currency, capacity, fees)
-│  └─ Stored in providers mapping
-│  └─ Added to registeredProviders array
-│  └─ Emits ProviderRegistered
+Provider Registration (Intent System)
+Flow
+Provider registers intent
+├─ registerIntent(currency, amount, fees, window)
+│  └ stored in providerIntents mapping
+│  └ emits IntentRegistered
 │
-├─ updateProvider(tier, capacity, fees)
-│  └─ Refresh tier & capacity
-│  └─ Emits ProviderUpdated
-│
-├─ deactivateProvider(provider)
-│  └─ Mark isActive = false
-│  └─ Emits ProviderDeactivated
+updateIntent(currency, newAmount)
+├─ refresh capacity & expiry
+└─ emits IntentUpdated
 
-```
----
-
-Functions:
-- registerProvider(tier, currency, capacity, minFee, maxFee)
-- updateProvider(tier, capacity, minFee, maxFee)
-- deactivateProvider(provider)
-- getProvider(provider)
-
----
+expireIntent(provider)
+├─ sets isActive = false
+└─ emits IntentExpired
 
 
----
+Functions
 
-C. Order Creation Flow
+registerIntent(currency, amount, minFee, maxFee, window)
+updateIntent(currency, newAmount)
+expireIntent(provider)
+reserveIntent(provider, amount)
+releaseIntent(provider, amount, reason)
+getProviderIntent(provider)
 
-User Action
-├─ createOrder(token, amount, refundAddress)
-│  ├─ Validate: token supported, amount > 0
-│  ├─ Determine tier (SMALL/MEDIUM/LARGE)
-│  ├─ Transfer token from user to contract
-│  ├─ Generate orderId
-│  ├─ Create Order struct
-│  ├─ Store in orders mapping
-│  ├─ Emit OrderCreated
-│  └─ Order Status: PENDING
-
----
-
----
-Functions:
-- createOrder(token, amount, refundAddress)
-- getOrder(orderId)
-- getUserNonce(user)
----
+Order Lifecycle
+A. Creation
+createOrder(token, amount, refundAddress)
+├─ Validate supported token
+├─ Determine tier (via GatewaySettings)
+├─ Lock user funds in contract
+├─ Emit OrderCreated
+└─ Status: PENDING
 
 
----
+Functions
 
-#### D. Settlement Proposal Flow
+createOrder(token, amount, refundAddress)
+getOrder(orderId)
+getUserNonce(user)
 
-Aggregator Action
-├─ routeOrder(orderId)
-│  ├─ Filter providers by order tier & currency
-│  ├─ Reserve capacity in backend if needed
-│  ├─ Send proposals to matching providers
-│  ├─ Emit SettlementProposalCreated
-│  └─ Order Status: PROPOSED
-│
-├─ Provider accepts (Race Condition)
-│  ├─ acceptProposal(proposalId)
-│  ├─ Order Status: ACCEPTED
-│  ├─ Other proposals auto-rejected
-│  └─ release capacity for rejected proposals
-│
-├─ Proposal Timeout
-│  ├─ timeoutProposal(proposalId)
-│  ├─ ProposalStatus = TIMEOUT
-│  └─ Release reserved capacity
-
----
-Functions:
-- createProposal(orderId, provider, feeBps)
-- acceptProposal(proposalId)
-- rejectProposal(proposalId, reason)
-- timeoutProposal(proposalId)
-- getProposal(proposalId)
----
-
----
-#### E. Settlement Execution Flow
-
-Aggregator Action
-├─ executeSettlement(proposalId)
-│  ├─ Validate: proposal accepted
-│  ├─ Calculate fees
-│  ├─ Transfer protocolFee → treasury
-│  ├─ Transfer providerAmount → provider
-│  ├─ Update order status: FULFILLED
-│  ├─ Update provider reputation
-│  └─ Emit SettlementExecuted
----
-
----
-Functions:
-
-- executeSettlement(proposalId)
----
-
----
-#### F. Refund Flow
-
-Auto-Refund (Timeout)
-├─ refundOrder(orderId)
-│  ├─ Validate: order expired / not fulfilled
-│  ├─ Transfer full amount → refundAddress
-│  ├─ Order Status: REFUNDED
-│  └─ Emit OrderRefunded
-
-Manual Refund (User)
-├─ requestRefund(orderId)
-│  ├─ Validate: user initiated, not fulfilled
-│  ├─ Transfer amount → refundAddress
-│  ├─ Order Status: CANCELLED
-│  └─ Emit OrderRefunded
-
----
-
----
-## Tier-Based Routing
-
+B. Tier-Based Routing
 ALPHA (< 3,000)
 ├─ Route to all active ALPHA-tier providers
 ├─ First to accept wins
@@ -364,321 +195,113 @@ TITAN (> 10,000)
 ├─ Must have sufficient capacity
 ├─ Sequential fallback if provider rejects
 
----
 
-#### B. Provider Intent Flow
+Tier logic lives off-chain — aggregator applies these routing rules using provider data from its backend.
 
-```
-Provider Registration
-├─ registerIntent(currency, amount, fees, window)
-│  └─ Stored in providerIntents mapping
-│  └─ Added to registeredProviders array
-│  └─ Emits IntentRegistered
-│
-├─ updateIntent(currency, newAmount)
-│  └─ Refresh capacity & expiry
-│  └─ Emits IntentUpdated
-│
-├─ expireIntent(provider)
-│  └─ Called by aggregator
-│  └─ Sets isActive = false
-│  └─ Emits IntentExpired
-│
-├─ reserveIntent(provider, amount)
-│  └─ Lock capacity when proposal sent
-│  └─ availableAmount -= amount
-│
-└─ releaseIntent(provider, amount, reason)
-   └─ Unlock capacity if proposal rejected
-   └─ availableAmount += amount
-```
+C. Proposal Flow (Parallel Execution)
+Aggregator:
+createProposal(orderId, provider, feeBps)
+├─ Validate: order pending & active intent
+├─ Check capacity >= order amount
+├─ Reserve provider capacity
+├─ Emit SettlementProposalCreated
+└─ Status: PROPOSED
 
-**Functions**:
-```
-- registerIntent(currency, amount, minFee, maxFee, window)
-- updateIntent(currency, newAmount)
-- expireIntent(provider)
-- reserveIntent(provider, amount)
-- releaseIntent(provider, amount, reason)
-- getProviderIntent(provider)
-```
+Provider:
+acceptProposal(proposalId)
+├─ Validate provider identity
+├─ Mark as ACCEPTED
+├─ Reject all other proposals
+└─ Emit SettlementProposalAccepted
 
----
+Timeout:
+timeoutProposal(proposalId)
+├─ block.timestamp > deadline
+├─ Mark as TIMEOUT
+└─ Release capacity
 
-#### C. Order Creation Flow
+D. Settlement Execution
+executeSettlement(proposalId)
+├─ Validate: proposal accepted
+├─ Calculate protocol + provider fees
+├─ Transfer protocolFee → treasury
+├─ Transfer providerAmount → provider
+├─ Mark order as FULFILLED
+└─ Emit SettlementExecuted
 
-```
-User Action
-├─ createOrder(token, amount, refundAddress)
-│  ├─ Validate: token supported, amount > 0
-│  ├─ Determine tier (SMALL/MEDIUM/LARGE)
-│  ├─ Transfer token from user to contract
-│  ├─ Generate orderId (nonce-based)
-│  ├─ Create Order struct
-│  ├─ Store in orders mapping
-│  ├─ Emit OrderCreated
-│  └─ Return orderId
-│
-└─ Order Status: PENDING
-```
+E. Refunds
+Auto-Refund
+refundOrder(orderId)
+├─ Called by aggregator
+├─ Validate: expired or unfulfilled
+└─ Refund user
 
-**Functions**:
-```
-- createOrder(token, amount, refundAddress)
-- getOrder(orderId)
-- getUserNonce(user)
-```
+Manual Refund
+requestRefund(orderId)
+├─ Called by user
+├─ Validate: not fulfilled
+└─ Refund user
 
----
+F. Reputation System
+_updateProviderSuccess(provider)
+├─ successfulOrders++
+├─ totalSettlementTime += Δt
+└─ Emit ProviderReputationUpdated
 
-#### D. Settlement Proposal Flow (Parallel Execution)
-
-```
-Aggregator Action
-├─ createProposal(orderId, provider, feeBps) × N providers
-│  ├─ Validate: order pending, intent active
-│  ├─ Check capacity >= order amount
-│  ├─ Generate proposalId
-│  ├─ Reserve capacity via reserveIntent()
-│  ├─ Create SettlementProposal
-│  ├─ Emit SettlementProposalCreated
-│  └─ Order Status: PROPOSED
-│
-├─ Provider accepts (Race Condition)
-│  ├─ acceptProposal(proposalId)
-│  │  ├─ Validate: provider matches
-│  │  ├─ Set ProposalStatus = ACCEPTED
-│  │  ├─ Set Order.acceptedProposalId
-│  │  ├─ Order Status: ACCEPTED
-│  │  └─ Emit SettlementProposalAccepted
-│  │
-│  └─ Other proposals auto-rejected
-│     ├─ rejectProposal(proposalId, reason)
-│     ├─ releaseIntent() for all others
-│     └─ Emit SettlementProposalRejected
-│
-├─ Proposal Timeout
-│  ├─ timeoutProposal(proposalId)
-│  ├─ block.timestamp > proposalDeadline
-│  ├─ Set ProposalStatus = TIMEOUT
-│  ├─ releaseIntent() for reserved capacity
-│  └─ Emit SettlementProposalTimeout
-│
-└─ Result: First accepted proposal wins
-```
-
-**Functions**:
-```
-- createProposal(orderId, provider, feeBps)
-- acceptProposal(proposalId)
-- rejectProposal(proposalId, reason)
-- timeoutProposal(proposalId)
-- getProposal(proposalId)
-```
-
----
-
-#### E. Settlement Execution Flow
-
-```
-Aggregator Action
-├─ executeSettlement(proposalId)
-│  ├─ Validate: proposal accepted
-│  ├─ Retrieve Order & Proposal
-│  ├─ Calculate fees:
-│  │  ├─ protocolFee = (amount × protocolFeePercent) / MAX_BPS
-│  │  ├─ providerFee = (amount × proposedFeeBps) / MAX_BPS
-│  │  └─ providerAmount = amount - protocolFee - providerFee
-│  ├─ Transfer protocolFee → treasuryAddress
-│  ├─ Transfer providerAmount → provider
-│  ├─ Mark proposalExecuted[proposalId] = true
-│  ├─ Order Status: FULFILLED
-│  ├─ Update provider reputation (success)
-│  └─ Emit SettlementExecuted
-│
-└─ Order Complete
-```
-
-**Functions**:
-```
-- executeSettlement(proposalId)
-```
-
----
-
-#### F. Refund Flow
-
-```
-Auto-Refund (Timeout)
-├─ refundOrder(orderId) - called by aggregator
-│  ├─ Validate: order not fulfilled, expired
-│  ├─ Order Status: REFUNDED
-│  ├─ Transfer full amount → refundAddress
-│  └─ Emit OrderRefunded
-
-Manual-Refund (User)
-├─ requestRefund(orderId) - called by user
-│  ├─ Validate: order creator, not fulfilled, expired
-│  ├─ Order Status: CANCELLED
-│  ├─ Transfer amount → refundAddress
-│  └─ Emit OrderRefunded
-```
-
-**Functions**:
-```
-- refundOrder(orderId)
-- requestRefund(orderId)
-```
-
----
-
-#### G. Reputation System
-
-```
-On Success
-├─ _updateProviderSuccess(provider, settlementTime)
-│  ├─ totalOrders++
-│  ├─ successfulOrders++
-│  ├─ totalSettlementTime += settlementTime
-│  └─ Emit ProviderReputationUpdated
-
-On Failure
-├─ flagFraudulent(provider)
-│  ├─ isFraudulent = true
-│  ├─ isActive = false
-│  └─ Emit ProviderFraudFlagged
+flagFraudulent(provider)
+├─ isFraudulent = true
+├─ isActive = false
+└─ Emit ProviderFraudFlagged
 
 Blacklist
-├─ blacklistProvider(provider, reason)
-│  ├─ isBlacklisted = true
-│  ├─ Called via AccessManager
-│  └─ Emit ProviderBlacklisted
-```
+blacklistProvider(provider)
+├─ AccessManager-only
+└─ Emit ProviderBlacklisted
 
-**Functions**:
-```
-- getProviderReputation(provider)
-- flagFraudulent(provider)
-- (blacklistProvider in AccessManager)
-```
+Access Control Matrix
+Function	Admin	Pauser	Aggregator	Provider	User
+createOrder	✓	-	✓	-	✓
+registerIntent	✓	-	✓	✓	-
+createProposal	✓	-	✓	-	-
+acceptProposal	✓	-	-	✓	-
+executeSettlement	✓	-	✓	-	-
+refundOrder	✓	-	✓	-	-
+blacklistProvider	✓	-	-	-	-
+pause/unpause	✓	✓	-	-	-
+Key Features
 
----
+✅ Parallel Settlement – Multiple providers race to accept
+✅ Time-Bound Proposals – Prevents hanging orders
+✅ Tier-Based Routing – Intelligent, off-chain optimization
+✅ Reputation Scoring – Penalizes slow or failed providers
+✅ Non-Custodial – Funds never leave escrow before settlement
+✅ Upgradeable & Secure – Timelock + UUPS proxy pattern
+✅ Access Control – Granular roles
+✅ Emergency Pause – Fast failsafe
+✅ Blacklist Protection – Malicious providers blocked
 
-## Complete Order Lifecycle
-
-```
-1. USER CREATES ORDER
-   createOrder() → Order Status: PENDING
-
-2. AGGREGATOR SENDS PROPOSALS
-   createProposal() × 3 providers → Order Status: PROPOSED
-   
-3. PROVIDERS RACE (First wins)
-   Provider A: acceptProposal() ✅ WINS
-   Provider B: timeout / reject
-   Provider C: timeout / reject
-   
-4. AGGREGATOR EXECUTES
-   executeSettlement() → Order Status: FULFILLED
-   
-5. OUTCOME
-   ✓ Provider gets funds
-   ✓ Protocol gets fees
-   ✓ User gets service
-```
-
----
-
-
----
-
-## Access Control Matrix
-
-| Function | Admin | Pauser | Aggregator | Provider | User |
-|----------|-------|--------|-----------|----------|------|
-| createOrder | ✓ | ✓ | ✓ | - | ✓ |
-| registerIntent | ✓ | ✓ | ✓ | ✓ | - |
-| createProposal | ✓ | ✓ | ✓ | - | - |
-| acceptProposal | ✓ | ✓ | - | ✓ | - |
-| executeSettlement | ✓ | ✓ | ✓ | - | - |
-| refundOrder | ✓ | ✓ | ✓ | - | - |
-| pause | ✓ | ✓ | - | - | - |
-| blacklist | ✓ | - | - | - | - |
-
----
-
-## Key Features
-
-✅ **Parallel Settlement** - Multiple providers compete
-✅ **Time-Bound Proposals** - Commitment windows enforced
-✅ **Tier-Based Routing** - Optimized for order size
-✅ **Reputation Tracking** - Provider scoring
-✅ **Non-Custodial** - Funds in escrow until settlement
-✅ **Upgradeable** - Timelock + proxy pattern
-✅ **Role-Based Access** - Fine-grained permissions
-✅ **Pause Mechanism** - Emergency controls
-✅ **Fraud Detection** - Blacklist malicious providers
-✅ **Auto-Cleanup** - Expired intents & orders
-
----
-
-
-## Events Summary
-
-**Provider Intent**:
-- IntentRegistered
-- IntentUpdated
-- IntentExpired
-- IntentReleased
-
-**Orders**:
-- OrderCreated
-- OrderQueued
-
-**Proposals**:
-- SettlementProposalCreated
-- SettlementProposalAccepted
-- SettlementProposalRejected
-- SettlementProposalTimeout
-
-**Settlement**:
-- SettlementExecuted
-- OrderRefunded
-
-**Reputation**:
-- ProviderReputationUpdated
-- ProviderBlacklisted
-- ProviderFraudFlagged
-
-**Access Control**:
-- RoleGranted
-- RoleRevoked
-- ContractPaused
-- ContractUnpaused
-
----
-
-## Deployment Order
-
-```
+Deployment Order
 1. Deploy AccessManager
 2. Deploy TimelockAdmin (owner = AccessManager)
 3. Deploy PayNodeGatewaySettings
 4. Deploy PayNodeGateway (implementation)
-5. Deploy ERC1967Proxy (points to PayNodeGateway)
+5. Deploy ERC1967Proxy (pointing to Gateway)
 6. Call initialize() on proxy
 7. Transfer ownership to TimelockAdmin
-```
 
----
+Security Features
 
-## Security Considerations
+✅ ReentrancyGuard on state-changing functions
 
-- ✅ ReentrancyGuard on state-changing functions
-- ✅ Pausable for emergency stops
-- ✅ Role-based access control
-- ✅ 48-hour upgrade timelock
-- ✅ Provider blacklisting
-- ✅ Capacity reservations prevent double-booking
-- ✅ Time-bound proposals prevent hanging orders
-- ✅ Event emissions for transparency
+✅ Pausable fallback for emergencies
+
+✅ RBAC with AccessManager
+
+✅ 48-hour upgrade timelock
+
+✅ Fraud and blacklist system
+
+✅ Tier-based routing for fair load distribution
+
+✅ Transparent events for all critical actions
+
