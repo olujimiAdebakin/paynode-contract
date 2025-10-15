@@ -58,14 +58,22 @@ contract PayNodeAdmin is TimelockController, AutomationCompatibleInterface, Reen
     /// @param newImplementation The new implementation contract address.
     /// @param scheduleTime The timestamp when the upgrade can be executed.
     /// @param caller The address that scheduled the upgrade.
-    event UpgradeScheduled(address indexed target, address indexed newImplementation, uint256 scheduleTime, address indexed caller);
+    event UpgradeScheduled(
+        address indexed target, address indexed newImplementation, uint256 scheduleTime, address indexed caller
+    );
     /// @notice Emitted when an upgrade is executed, either manually or via automation.
     /// @param target The proxy contract that was upgraded.
     /// @param newImplementation The new implementation contract address.
     /// @param executedAt The timestamp of execution.
     /// @param caller The address that triggered the execution.
     /// @param isAutomated True if triggered by Chainlink Automation, false if manual.
-    event UpgradeExecuted(address indexed target, address indexed newImplementation, uint256 executedAt, address indexed caller, bool isAutomated);
+    event UpgradeExecuted(
+        address indexed target,
+        address indexed newImplementation,
+        uint256 executedAt,
+        address indexed caller,
+        bool isAutomated
+    );
     /// @notice Emitted when a scheduled upgrade is canceled.
     /// @param target The proxy contract whose upgrade was canceled.
     /// @param newImplementation The implementation address that was canceled.
@@ -77,7 +85,9 @@ contract PayNodeAdmin is TimelockController, AutomationCompatibleInterface, Reen
     /// @param grant True if granting, false if revoking.
     /// @param scheduleTime The timestamp when the role change can be executed (0 for cancellation).
     /// @param operationId The unique identifier for the role change operation.
-    event RoleChangeScheduled(address indexed account, bytes32 indexed role, bool grant, uint256 scheduleTime, bytes32 operationId);
+    event RoleChangeScheduled(
+        address indexed account, bytes32 indexed role, bool grant, uint256 scheduleTime, bytes32 operationId
+    );
     /// @notice Emitted when a role change is executed.
     /// @param account The account modified.
     /// @param role The role granted or revoked.
@@ -148,8 +158,8 @@ contract PayNodeAdmin is TimelockController, AutomationCompatibleInterface, Reen
     constructor(
         address[] memory proposers,
         address[] memory executors,
-        address superAdmin,      // Will get DEFAULT_ADMIN_ROLE (can manage roles)
-        address upgradeAdmin,   // Will get ADMIN_ROLE (can perform upgrades)
+        address superAdmin, // Will get DEFAULT_ADMIN_ROLE (can manage roles)
+        address upgradeAdmin, // Will get ADMIN_ROLE (can perform upgrades)
         address _chainlinkKeeper
     ) TimelockController(MIN_DELAY, proposers, executors, superAdmin) {
         // Validate the Chainlink Keeper address to prevent zero address.
@@ -263,9 +273,8 @@ contract PayNodeAdmin is TimelockController, AutomationCompatibleInterface, Reen
         }
 
         // Perform a low-level call to the proxy's upgradeTo function.
-        (bool success, bytes memory data) = target.call(
-            abi.encodeWithSignature("upgradeTo(address)", upgrade.newImplementation)
-        );
+        (bool success, bytes memory data) =
+            target.call(abi.encodeWithSignature("upgradeTo(address)", upgrade.newImplementation));
         // Revert if the call fails, including return data for debugging.
         if (!success) revert UpgradeFailed(target, data);
 
@@ -283,7 +292,12 @@ contract PayNodeAdmin is TimelockController, AutomationCompatibleInterface, Reen
     // / @param checkData Not used; included for compatibility with Chainlink Automation.
     /// @return upkeepNeeded True if an upgrade is ready to be executed.
     /// @return performData The encoded target address for the ready upgrade.
-    function checkUpkeep(bytes calldata /* checkData */) external view override returns (bool upkeepNeeded, bytes memory performData) {
+    function checkUpkeep(bytes calldata /* checkData */ )
+        external
+        view
+        override
+        returns (bool upkeepNeeded, bytes memory performData)
+    {
         // Iterate through all targets in the upgradeQueue.
         for (uint256 i = 0; i < upgradeQueue.length; i++) {
             address target = upgradeQueue[i];
@@ -326,14 +340,15 @@ contract PayNodeAdmin is TimelockController, AutomationCompatibleInterface, Reen
     /// @param account The account to grant or revoke the role for.
     /// @param role The role to modify (e.g., ADMIN_ROLE or DEFAULT_ADMIN_ROLE).
     /// @param grant True to grant the role, false to revoke it.
-    function scheduleRoleChange(address account, bytes32 role, bool grant) 
-        external onlyRole(ADMIN_ROLE) whenNotPaused {
+    function scheduleRoleChange(address account, bytes32 role, bool grant)
+        external
+        onlyRole(ADMIN_ROLE)
+        whenNotPaused
+    {
         if (account == address(0)) revert InvalidAddress();
-        
-        bytes32 operationId = keccak256(
-            abi.encode(account, role, grant, block.timestamp)
-        );
-        
+
+        bytes32 operationId = keccak256(abi.encode(account, role, grant, block.timestamp));
+
         pendingRoleChanges[operationId] = PendingRoleChange({
             account: account,
             role: role,
@@ -342,23 +357,16 @@ contract PayNodeAdmin is TimelockController, AutomationCompatibleInterface, Reen
             exists: true
         });
 
-        emit RoleChangeScheduled(
-            account, 
-            role, 
-            grant, 
-            block.timestamp + MIN_DELAY, 
-            operationId
-        );
+        emit RoleChangeScheduled(account, role, grant, block.timestamp + MIN_DELAY, operationId);
     }
 
     /// @notice Executes a pending role change after the timelock period.
     /// @dev Verifies timelock and executes the role change using _grantRole or _revokeRole.
     ///      Restricted to DEFAULT_ADMIN_ROLE and requires the contract to be unpaused.
     /// @param operationId The unique identifier of the pending role change.
-    function executeRoleChange(bytes32 operationId) 
-        external onlyRole(DEFAULT_ADMIN_ROLE) whenNotPaused {
+    function executeRoleChange(bytes32 operationId) external onlyRole(DEFAULT_ADMIN_ROLE) whenNotPaused {
         PendingRoleChange memory change = pendingRoleChanges[operationId];
-        
+
         if (!change.exists) revert RoleChangeNotReady(operationId);
         if (block.timestamp < change.scheduleTime) revert RoleChangeNotReady(operationId);
 
@@ -388,13 +396,12 @@ contract PayNodeAdmin is TimelockController, AutomationCompatibleInterface, Reen
     /// @dev Removes the role change from pendingRoleChanges. Restricted to DEFAULT_ADMIN_ROLE
     ///      and requires the contract to be unpaused.
     /// @param operationId The operation ID to cancel.
-    function cancelRoleChange(bytes32 operationId) 
-        external onlyRole(DEFAULT_ADMIN_ROLE) whenNotPaused {
+    function cancelRoleChange(bytes32 operationId) external onlyRole(DEFAULT_ADMIN_ROLE) whenNotPaused {
         PendingRoleChange memory change = pendingRoleChanges[operationId];
         if (!change.exists) revert RoleChangeNotReady(operationId);
-        
+
         delete pendingRoleChanges[operationId];
-        
+
         emit RoleChangeScheduled(
             change.account,
             change.role,

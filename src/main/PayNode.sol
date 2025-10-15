@@ -16,22 +16,13 @@ contract PayNode {
     address public owner;
     bool public deployed;
 
-    event PayNodeDeployed(
-        address indexed admin,
-        address gatewayProxy,
-        address timelockAdmin,
-        address settings
-    );
+    event PayNodeDeployed(address indexed admin, address gatewayProxy, address timelockAdmin, address settings);
 
     constructor() {
         owner = msg.sender;
     }
 
-    function deploySystem(
-        address _admin,
-        address _aggregator,
-        address _treasury
-    ) external {
+    function deploySystem(address _admin, address _aggregator, address _treasury) external {
         require(msg.sender == owner, "Only owner");
         require(!deployed, "Already deployed");
 
@@ -42,23 +33,14 @@ contract PayNode {
         timelockAdmin = new TimelockAdmin(address(accessManager), 2 days);
 
         // 3️⃣ Deploy GatewaySettings
-        gatewaySettings = new PGatewaySettings(
-            _aggregator,
-            _treasury,
-            address(accessManager)
-        );
+        gatewaySettings = new PGatewaySettings(_aggregator, _treasury, address(accessManager));
 
         // 4️⃣ Deploy Gateway Implementation
         PGateway gatewayImpl = new PGateway(address(gatewaySettings));
 
         // 5️⃣ Deploy Proxy for Gateway
         gatewayProxy = PGateway(
-            address(
-                new ERC1967Proxy(
-                    address(gatewayImpl),
-                    abi.encodeWithSelector(PGateway.initialize.selector)
-                )
-            )
+            address(new ERC1967Proxy(address(gatewayImpl), abi.encodeWithSelector(PGateway.initialize.selector)))
         );
 
         // 6️⃣ Transfer ownership to Timelock
@@ -67,11 +49,6 @@ contract PayNode {
 
         deployed = true;
 
-        emit PayNodeDeployed(
-            _admin,
-            address(gatewayProxy),
-            address(timelockAdmin),
-            address(gatewaySettings)
-        );
+        emit PayNodeDeployed(_admin, address(gatewayProxy), address(timelockAdmin), address(gatewaySettings));
     }
 }

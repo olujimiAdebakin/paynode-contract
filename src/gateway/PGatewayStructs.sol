@@ -2,11 +2,27 @@
 pragma solidity ^0.8.18;
 
 contract PGatewayStructs {
-
     /* ========== ENUMS ========== */
-    enum OrderTier { SMALL, MEDIUM, LARGE }
-    enum OrderStatus { PENDING, PROPOSED, ACCEPTED, FULFILLED, REFUNDED, CANCELLED }
-    enum ProposalStatus { PENDING, ACCEPTED, REJECTED, TIMEOUT, CANCELLED }
+    enum OrderTier {
+        SMALL,
+        MEDIUM,
+        LARGE
+    }
+    enum OrderStatus {
+        PENDING,
+        PROPOSED,
+        ACCEPTED,
+        FULFILLED,
+        REFUNDED,
+        CANCELLED
+    }
+    enum ProposalStatus {
+        PENDING,
+        ACCEPTED,
+        REJECTED,
+        TIMEOUT,
+        CANCELLED
+    }
 
     /* ========== STRUCTS ========== */
     struct ProviderIntent {

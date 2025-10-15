@@ -97,7 +97,9 @@ contract PayNodeAccessManager is
     /// @param isSuperAdmin True if the change is for the DEFAULT_ADMIN_ROLE, false for ADMIN_ROLE.
     /// @param scheduleTime The timestamp when the admin change can be executed.
     /// @param operationId The unique identifier for this scheduled admin change operation.
-    event AdminChangeScheduled(address indexed newAdmin, bool isSuperAdmin, uint256 scheduleTime, bytes32 indexed operationId);
+    event AdminChangeScheduled(
+        address indexed newAdmin, bool isSuperAdmin, uint256 scheduleTime, bytes32 indexed operationId
+    );
 
     // ============================
     // State Variables
@@ -123,12 +125,13 @@ contract PayNodeAccessManager is
     /// @notice Struct to hold details for a pending change to a core admin address (superAdmin or pasarAdmin).
     ///         This enables timelocked changes for critical administrative roles.
     struct PendingAdminChange {
-        address newAdmin;       // The proposed new admin address.
-        uint256 scheduleTime;   // The timestamp after which the change can be executed.
-        bool isSuperAdmin;      // True if the change is for superAdmin, false for pasarAdmin.
-        bool exists;            // Flag indicating if a pending change exists for this operationId.
+        address newAdmin; // The proposed new admin address.
+        uint256 scheduleTime; // The timestamp after which the change can be executed.
+        bool isSuperAdmin; // True if the change is for superAdmin, false for pasarAdmin.
+        bool exists; // Flag indicating if a pending change exists for this operationId.
     }
     /// @notice Mapping of unique operation IDs to their corresponding PendingAdminChange details.
+
     mapping(bytes32 => PendingAdminChange) public pendingAdminChanges;
 
     /// @notice Minimum delay (2 days) that must pass between scheduling and executing certain critical operations,
@@ -151,18 +154,14 @@ contract PayNodeAccessManager is
     /// @param _pasarAdmin The initial address of the PasarAdmin contract, which will hold the ADMIN_ROLE.
     /// @param _superAdmin The initial address to receive the DEFAULT_ADMIN_ROLE privileges (the highest authority).
     /// @param operators An array of addresses to receive the OPERATOR_ROLE during initial setup.
-    function initialize(
-        address _pasarAdmin,
-        address _superAdmin,
-        address[] calldata operators
-    ) public initializer {
+    function initialize(address _pasarAdmin, address _superAdmin, address[] calldata operators) public initializer {
         // Input Validation: Ensures no zero addresses are provided for critical roles and that at least one operator is provided.
         if (_superAdmin == address(0) || _pasarAdmin == address(0) || operators.length == 0) revert InvalidAddress();
 
         // Initialize OpenZeppelin Base Contracts: Calls the initializer functions of all inherited OpenZeppelin modules.
         // This is crucial for setting up their internal state correctly for upgradeability.
-        __AccessControl_init();   // Initializes AccessControl's internal state.
-        __Pausable_init();        // Initializes Pausable's internal state (sets paused to false).
+        __AccessControl_init(); // Initializes AccessControl's internal state.
+        __Pausable_init(); // Initializes Pausable's internal state (sets paused to false).
         __ReentrancyGuard_init(); // Initializes ReentrancyGuard's internal state.
         __UUPSUpgradeable_init(); // Initializes UUPSUpgradeable's internal state.
 
@@ -183,8 +182,9 @@ contract PayNodeAccessManager is
         for (uint256 i = 0; i < operators.length; i++) {
             // Input Validation: Ensures operator addresses are valid and not already higher-privileged admins.
             // This prevents accidental or malicious assignment of a lower role to a critical admin address.
-            if (operators[i] == address(0) || operators[i] == superAdmin || operators[i] == pasarAdmin)
+            if (operators[i] == address(0) || operators[i] == superAdmin || operators[i] == pasarAdmin) {
                 revert InvalidRoleConfiguration();
+            }
             _grantRole(OPERATOR_ROLE, operators[i]); // Grants the OPERATOR_ROLE.
             emit RoleAssigned(operators[i], OPERATOR_ROLE, msg.sender); // Logs the role assignment.
         }
@@ -225,8 +225,8 @@ contract PayNodeAccessManager is
     function setSystemFlag(bytes32 flag, bool status)
         external
         onlyRole(DEFAULT_ADMIN_ROLE) // Only the super admin can change system flags.
-        whenNotPaused                 // Cannot be called if the contract is paused.
-        whenSystemActive              // Cannot be called if the system is in emergency locked state.
+        whenNotPaused // Cannot be called if the contract is paused.
+        whenSystemActive // Cannot be called if the system is in emergency locked state.
     {
         // Input Validation: Ensures only predefined flags can be updated.
         if (flag != TRADING_ENABLED && flag != WITHDRAWALS_ENABLED) revert SystemFlagNotFound(flag);
@@ -242,13 +242,14 @@ contract PayNodeAccessManager is
     function setBlacklistStatus(address user, bool status)
         external
         onlyRole(OPERATOR_ROLE) // Only operators can manage the blacklist.
-        whenNotPaused             // Cannot be called if the contract is paused.
-        whenSystemActive          // Cannot be called if the system is in emergency locked state.
+        whenNotPaused // Cannot be called if the contract is paused.
+        whenSystemActive // Cannot be called if the system is in emergency locked state.
     {
         if (user == address(0)) revert InvalidAddress(); // Prevents zero address blacklisting.
         // Security Check: Prevents operators from blacklisting higher-privileged admin roles.
-        if (hasRole(ADMIN_ROLE, user) || hasRole(DEFAULT_ADMIN_ROLE, user))
+        if (hasRole(ADMIN_ROLE, user) || hasRole(DEFAULT_ADMIN_ROLE, user)) {
             revert UnauthorizedOperation();
+        }
         isBlacklisted[user] = status; // Update the blacklist status.
         emit BlacklistStatusChanged(user, status, msg.sender); // Log the change.
     }
@@ -258,22 +259,20 @@ contract PayNodeAccessManager is
     ///      Includes the same security checks as `setBlacklistStatus` for each user.
     /// @param users An array of addresses to update.
     /// @param statuses An array of boolean statuses (true/false) corresponding to each user.
-    function batchUpdateBlacklist(
-        address[] calldata users,
-        bool[] calldata statuses
-    )
+    function batchUpdateBlacklist(address[] calldata users, bool[] calldata statuses)
         external
         onlyRole(OPERATOR_ROLE) // Only operators can manage the blacklist.
-        whenNotPaused             // Cannot be called if the contract is paused.
-        whenSystemActive          // Cannot be called if the system is in emergency locked state.
+        whenNotPaused // Cannot be called if the contract is paused.
+        whenSystemActive // Cannot be called if the system is in emergency locked state.
     {
         // Input Validation: Ensures array lengths match to prevent errors.
         if (users.length != statuses.length) revert InvalidRoleConfiguration();
         for (uint256 i = 0; i < users.length; i++) {
             if (users[i] == address(0)) revert InvalidAddress(); // Prevents zero address blacklisting.
             // Security Check: Prevents operators from blacklisting higher-privileged admin roles.
-            if (hasRole(ADMIN_ROLE, users[i]) || hasRole(DEFAULT_ADMIN_ROLE, users[i]))
+            if (hasRole(ADMIN_ROLE, users[i]) || hasRole(DEFAULT_ADMIN_ROLE, users[i])) {
                 revert UnauthorizedOperation();
+            }
             isBlacklisted[users[i]] = statuses[i]; // Update the blacklist status for each user.
             emit BlacklistStatusChanged(users[i], statuses[i], msg.sender); // Log each change.
         }
@@ -285,9 +284,10 @@ contract PayNodeAccessManager is
     /// @param newAdmin The new address proposed to be assigned the admin role.
     /// @param isSuperAdmin True if the change is for the `DEFAULT_ADMIN_ROLE`, false if for the `ADMIN_ROLE`.
     function scheduleAdminChange(address newAdmin, bool isSuperAdmin)
-        external onlyRole(DEFAULT_ADMIN_ROLE) // Only the current super admin can schedule admin changes.
-        whenNotPaused                        // Cannot be called if the contract is paused.
-        whenSystemActive                     // Cannot be called if the system is in emergency locked state.
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE) // Only the current super admin can schedule admin changes.
+        whenNotPaused // Cannot be called if the contract is paused.
+        whenSystemActive // Cannot be called if the system is in emergency locked state.
     {
         if (newAdmin == address(0)) revert InvalidAddress(); // Prevents setting zero address as admin.
         // Create a unique operation ID for this specific admin change.
@@ -307,9 +307,10 @@ contract PayNodeAccessManager is
     /// @dev This function finalizes the update of either the `superAdmin` or `pasarAdmin` address.
     /// @param operationId The unique identifier of the pending admin change to execute.
     function executeAdminChange(bytes32 operationId)
-        external onlyRole(DEFAULT_ADMIN_ROLE) // Only the super admin can execute admin changes.
-        whenNotPaused                        // Cannot be called if the contract is paused.
-        whenSystemActive                     // Cannot be called if the system is in emergency locked state.
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE) // Only the super admin can execute admin changes.
+        whenNotPaused // Cannot be called if the contract is paused.
+        whenSystemActive // Cannot be called if the system is in emergency locked state.
     {
         PendingAdminChange memory change = pendingAdminChanges[operationId];
         // Validation: Checks if the operation exists and if the timelock has passed.
@@ -336,7 +337,7 @@ contract PayNodeAccessManager is
     ///      Functions protected by `whenSystemActive` and `whenNotPaused` will be affected.
     function emergencyShutdown() external onlyRole(DEFAULT_ADMIN_ROLE) {
         systemLocked = true; // Set the system to a locked state.
-        _pause();            // Pause the contract's operations.
+        _pause(); // Pause the contract's operations.
         emit EmergencyShutdown(msg.sender); // Log the emergency shutdown.
     }
 
@@ -345,7 +346,7 @@ contract PayNodeAccessManager is
     ///      (inherited from `PausableUpgradeable`).
     function restoreSystem() external onlyRole(DEFAULT_ADMIN_ROLE) {
         systemLocked = false; // Set the system back to an active state.
-        _unpause();           // Unpause the contract's operations.
+        _unpause(); // Unpause the contract's operations.
         emit SystemRestored(msg.sender); // Log the system restoration.
     }
 
@@ -363,7 +364,6 @@ contract PayNodeAccessManager is
     function unpause() external onlyRole(DEFAULT_ADMIN_ROLE) whenSystemActive {
         _unpause(); // Calls the internal _unpause() function from PausableUpgradeable.
     }
-
 
     // ============================
     // View Functions
@@ -426,9 +426,10 @@ contract PayNodeAccessManager is
     ///      is not paused and the system is active.
     /// @param operationId The unique identifier of the pending admin change to cancel.
     function cancelAdminChange(bytes32 operationId)
-        external onlyRole(DEFAULT_ADMIN_ROLE) // Only the super admin can cancel admin changes.
-        whenNotPaused                        // Cannot be called if the contract is paused.
-        whenSystemActive                     // Cannot be called if the system is in emergency locked state.
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE) // Only the super admin can cancel admin changes.
+        whenNotPaused // Cannot be called if the contract is paused.
+        whenSystemActive // Cannot be called if the system is in emergency locked state.
     {
         PendingAdminChange memory change = pendingAdminChanges[operationId];
         // Validation: Checks if the operation exists. Using UnauthorizedOperation for consistency
@@ -457,9 +458,9 @@ contract PayNodeAccessManager is
     /// @param newImplementation The address of the new implementation contract to upgrade to.
     function _authorizeUpgrade(address newImplementation)
         internal
-        override          // Overrides the virtual function from UUPSUpgradeable.
+        override // Overrides the virtual function from UUPSUpgradeable.
         onlyRole(ADMIN_ROLE) // Requires the caller to have the ADMIN_ROLE.
-        whenSystemActive  // Cannot be called if the system is in emergency locked state.
+        whenSystemActive // Cannot be called if the system is in emergency locked state.
     {
         // Critical Security Check: Ensures that only the designated `PasarAdmin` contract
         // (which is a timelocked governance contract) can trigger an upgrade of this AccessManager.
@@ -482,13 +483,13 @@ contract PayNodeAccessManager is
         external
         virtual // Marks the function as virtual, allowing derived contracts to override it.
         onlyRole(DISPUTE_MANAGER_ROLE) // Only dispute managers can call this.
-        whenNotPaused                 // Cannot be called if the contract is paused.
-        whenSystemActive              // Cannot be called if the system is in emergency locked state.
+        whenNotPaused // Cannot be called if the contract is paused.
+        whenSystemActive // Cannot be called if the system is in emergency locked state.
     {
         if (winner == address(0)) revert InvalidAddress(); // Basic validation.
-        // Placeholder for inherited contract implementation:
-        // A contract like `PasarDispute` would implement the actual logic here,
-        // e.g., updating dispute status, triggering escrow actions.
+            // Placeholder for inherited contract implementation:
+            // A contract like `PasarDispute` would implement the actual logic here,
+            // e.g., updating dispute status, triggering escrow actions.
     }
 
     /// @notice Virtual function to manage platform services. Intended to be overridden by a specific service contract.
@@ -500,8 +501,8 @@ contract PayNodeAccessManager is
         external
         virtual // Marks the function as virtual.
         onlyRole(PLATFORM_SERVICE_ROLE) // Only platform services can call this.
-        whenNotPaused                 // Cannot be called if the contract is paused.
-        whenSystemActive              // Cannot be called if the system is in emergency locked state.
+        whenNotPaused // Cannot be called if the contract is paused.
+        whenSystemActive // Cannot be called if the system is in emergency locked state.
     {
         // Placeholder for inherited contract implementation:
         // A derived contract would implement logic here to manage a specific service
