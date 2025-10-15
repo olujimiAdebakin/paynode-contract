@@ -6,7 +6,8 @@ PayNode is a **non-custodial payment aggregation protocol** that connects users 
 
 **Core Innovation**: Providers pre-register their available capacity (intent), eliminating stale pricing and enabling intelligent provider selection. The system automatically ranks providers by success rate, speed, uptime, and fees, then races them for each order.
 
-**Architecture**: 
+**Architecture**:
+
 - **AccessManager** enforces role-based permissions across all contracts
 - **TimelockAdmin** ensures secure upgrades with 48-hour delays
 - **GatewaySettings** centralizes protocol configuration
@@ -18,40 +19,40 @@ PayNode is a **non-custodial payment aggregation protocol** that connects users 
 
 ## System Architecture
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                    AccessManager                         │
-│  • Admin role control                                    │
-│  • Pause/Unpause permissions                            │
-│  • Blacklist management                                 │
-│  • Role-based access control (RBAC)                     │
-└─────────────────────────────────────────────────────────┘
-         ↓
-┌─────────────────────────────────────────────────────────┐
-│                  TimelockAdmin                          │
-│  • Upgrade scheduling (48h delay)                       │
-│  • Proposal queuing                                     │
-│  • Execution after timelock                            │
-│  • Cancel malicious upgrades                           │
-└─────────────────────────────────────────────────────────┘
-         ↓
-┌─────────────────────────────────────────────────────────┐
-│            PayNodeGatewaySettings                       │
-│  • Configuration parameters                             │
-│  • Token whitelist                                      │
-│  • Fee settings                                         │
-│  • Tier limits (SMALL/MEDIUM/LARGE)                    │
-└─────────────────────────────────────────────────────────┘
-         ↓
-┌─────────────────────────────────────────────────────────┐
-│             PayNodeGateway (Proxy)                       │
-│  • Order creation & management                          │
-│  • Provider intent registry                             │
-│  • Settlement proposals (parallel)                      │
-│  • Settlement execution                                │
-│  • Refund handling                                      │
-│  • Reputation tracking                                 │
-└─────────────────────────────────────────────────────────┘
+```ansi
+[34m┌─────────────────────────────────────────────────────────┐[0m
+[34m│[0m                    [1;37mAccessManager[0m                         [34m│[0m
+[34m│[0m  [33m• Admin role control[0m                                    [34m│[0m
+[34m│[0m  [33m• Pause/Unpause permissions[0m                            [34m│[0m
+[34m│[0m  [33m• Blacklist management[0m                                 [34m│[0m
+[34m│[0m  [33m• Role-based access control (RBAC)[0m                     [34m│[0m
+[34m└─────────────────────────────────────────────────────────┘[0m
+         [36m↓[0m
+[32m┌─────────────────────────────────────────────────────────┐[0m
+[32m│[0m                  [1;37mTimelockAdmin[0m                          [32m│[0m
+[32m│[0m  [33m• Upgrade scheduling (48h delay)[0m                       [32m│[0m
+[32m│[0m  [33m• Proposal queuing[0m                                     [32m│[0m
+[32m│[0m  [33m• Execution after timelock[0m                            [32m│[0m
+[32m│[0m  [33m• Cancel malicious upgrades[0m                           [32m│[0m
+[32m└─────────────────────────────────────────────────────────┘[0m
+         [36m↓[0m
+[35m┌─────────────────────────────────────────────────────────┐[0m
+[35m│[0m            [1;37mPayNodeGatewaySettings[0m                       [35m│[0m
+[35m│[0m  [33m• Configuration parameters[0m                             [35m│[0m
+[35m│[0m  [33m• Token whitelist[0m                                     [35m│[0m
+[35m│[0m  [33m• Fee settings[0m                                        [35m│[0m
+[35m│[0m  [33m• Tier limits (SMALL/MEDIUM/LARGE)[0m                    [35m│[0m
+[35m└─────────────────────────────────────────────────────────┘[0m
+         [36m↓[0m
+[31m┌─────────────────────────────────────────────────────────┐[0m
+[31m│[0m             [1;37mPayNodeGateway (Proxy)[0m                       [31m│[0m
+[31m│[0m  [33m• Order creation & management[0m                          [31m│[0m
+[31m│[0m  [33m• Provider intent registry[0m                             [31m│[0m
+[31m│[0m  [33m• Settlement proposals (parallel)[0m                      [31m│[0m
+[31m│[0m  [33m• Settlement execution[0m                                [31m│[0m
+[31m│[0m  [33m• Refund handling[0m                                      [31m│[0m
+[31m│[0m  [33m• Reputation tracking[0m                                 [31m│[0m
+[31m└─────────────────────────────────────────────────────────┘[0m
 ```
 
 ---
@@ -63,12 +64,14 @@ PayNode is a **non-custodial payment aggregation protocol** that connects users 
 **Purpose**: Centralized permission control
 
 **Roles**:
+
 - `ADMIN_ROLE` - Full system control
 - `PAUSER_ROLE` - Can pause contracts
 - `AGGREGATOR_ROLE` - Settlement operations
 - `UPGRADER_ROLE` - Can queue upgrades
 
 **Functions**:
+
 ```
 - grantRole(role, account)
 - revokeRole(role, account)
@@ -81,6 +84,7 @@ PayNode is a **non-custodial payment aggregation protocol** that connects users 
 ```
 
 **Events**:
+
 ```
 - RoleGranted(role, account)
 - RoleRevoked(role, account)
@@ -97,10 +101,12 @@ PayNode is a **non-custodial payment aggregation protocol** that connects users 
 **Purpose**: Secure contract upgrades with delay
 
 **Parameters**:
+
 - Minimum delay: 2 days
 - Execution window: 7 days
 
 **Functions**:
+
 ```
 - scheduleUpgrade(implementation, data)
 - executeUpgrade(proposalId)
@@ -109,9 +115,11 @@ PayNode is a **non-custodial payment aggregation protocol** that connects users 
 ```
 
 **States**:
+
 - PENDING → READY → EXECUTED / CANCELLED
 
 **Events**:
+
 ```
 - UpgradeScheduled(proposalId, implementation, eta)
 - UpgradeExecuted(proposalId, implementation)
@@ -125,6 +133,7 @@ PayNode is a **non-custodial payment aggregation protocol** that connects users 
 **Purpose**: Centralized settings management (inherited by Gateway)
 
 **Configuration Variables**:
+
 ```
 - MAX_BPS = 100,000
 - protocolFeePercent (0-5%)
@@ -138,6 +147,7 @@ PayNode is a **non-custodial payment aggregation protocol** that connects users 
 ```
 
 **Token Management**:
+
 ```
 - supportedTokens mapping
 - addSupportedToken(address)
@@ -145,6 +155,7 @@ PayNode is a **non-custodial payment aggregation protocol** that connects users 
 ```
 
 **Functions**:
+
 ```
 - setProtocolFee(uint64)
 - setTierLimits(small, medium)
@@ -154,6 +165,7 @@ PayNode is a **non-custodial payment aggregation protocol** that connects users 
 ```
 
 **Events**:
+
 ```
 - ProtocolFeeUpdated(newFee)
 - TierLimitsUpdated(small, medium)
@@ -173,13 +185,13 @@ enum OrderTier { SMALL, MEDIUM, LARGE }
 enum OrderStatus { PENDING, PROPOSED, ACCEPTED, FULFILLED, REFUNDED, CANCELLED }
 enum ProposalStatus { PENDING, ACCEPTED, REJECTED, TIMEOUT, CANCELLED }
 
-struct ProviderIntent {
+struct Provider {
     address provider
+    OrderTier tier            // Self-declared tier
     string currency
-    uint256 availableAmount
+    uint256 maxCapacity       // Max capacity they can handle
     uint64 minFeeBps, maxFeeBps
-    uint256 registeredAt, expiresAt
-    uint256 commitmentWindow
+    uint256 registeredAt
     bool isActive
 }
 
@@ -208,10 +220,27 @@ struct SettlementProposal {
 struct ProviderReputation {
     address provider
     uint256 totalOrders, successfulOrders, failedOrders
-    uint256 noShowCount, totalSettlementTime
+    uint256 totalSettlementTime
     bool isFraudulent, isBlacklisted
 }
+
 ```
+
+B. Provider Registration & Intent Flow
+
+Provider Registration
+├─ registerProvider(tier, currency, capacity, fees)
+│ └─ Stored in providers mapping
+│ └─ Added to registeredProviders array
+│ └─ Emits ProviderRegistered
+│
+├─ updateProvider(tier, capacity, fees)
+│ └─ Refresh tier & capacity
+│ └─ Emits ProviderUpdated
+│
+├─ deactivateProvider(provider)
+│ └─ Mark isActive = false
+│ └─ Emits ProviderDeactivated
 
 ---
 
@@ -243,6 +272,7 @@ Provider Registration
 ```
 
 **Functions**:
+
 ```
 - registerIntent(currency, amount, minFee, maxFee, window)
 - updateIntent(currency, newAmount)
@@ -272,6 +302,7 @@ User Action
 ```
 
 **Functions**:
+
 ```
 - createOrder(token, amount, refundAddress)
 - getOrder(orderId)
@@ -317,6 +348,7 @@ Aggregator Action
 ```
 
 **Functions**:
+
 ```
 - createProposal(orderId, provider, feeBps)
 - acceptProposal(proposalId)
@@ -349,6 +381,7 @@ Aggregator Action
 ```
 
 **Functions**:
+
 ```
 - executeSettlement(proposalId)
 ```
@@ -374,6 +407,7 @@ Manual-Refund (User)
 ```
 
 **Functions**:
+
 ```
 - refundOrder(orderId)
 - requestRefund(orderId)
@@ -405,6 +439,7 @@ Blacklist
 ```
 
 **Functions**:
+
 ```
 - getProviderReputation(provider)
 - flagFraudulent(provider)
@@ -421,15 +456,15 @@ Blacklist
 
 2. AGGREGATOR SENDS PROPOSALS
    createProposal() × 3 providers → Order Status: PROPOSED
-   
+
 3. PROVIDERS RACE (First wins)
    Provider A: acceptProposal() ✅ WINS
    Provider B: timeout / reject
    Provider C: timeout / reject
-   
+
 4. AGGREGATOR EXECUTES
    executeSettlement() → Order Status: FULFILLED
-   
+
 5. OUTCOME
    ✓ Provider gets funds
    ✓ Protocol gets fees
@@ -461,16 +496,16 @@ LARGE (> 20,000)
 
 ## Access Control Matrix
 
-| Function | Admin | Pauser | Aggregator | Provider | User |
-|----------|-------|--------|-----------|----------|------|
-| createOrder | ✓ | ✓ | ✓ | - | ✓ |
-| registerIntent | ✓ | ✓ | ✓ | ✓ | - |
-| createProposal | ✓ | ✓ | ✓ | - | - |
-| acceptProposal | ✓ | ✓ | - | ✓ | - |
-| executeSettlement | ✓ | ✓ | ✓ | - | - |
-| refundOrder | ✓ | ✓ | ✓ | - | - |
-| pause | ✓ | ✓ | - | - | - |
-| blacklist | ✓ | - | - | - | - |
+| Function          | Admin | Pauser | Aggregator | Provider | User |
+| ----------------- | ----- | ------ | ---------- | -------- | ---- |
+| createOrder       | ✓     | ✓      | ✓          | -        | ✓    |
+| registerIntent    | ✓     | ✓      | ✓          | ✓        | -    |
+| createProposal    | ✓     | ✓      | ✓          | -        | -    |
+| acceptProposal    | ✓     | ✓      | -          | ✓        | -    |
+| executeSettlement | ✓     | ✓      | ✓          | -        | -    |
+| refundOrder       | ✓     | ✓      | ✓          | -        | -    |
+| pause             | ✓     | ✓      | -          | -        | -    |
+| blacklist         | ✓     | -      | -          | -        | -    |
 
 ---
 
@@ -492,31 +527,37 @@ LARGE (> 20,000)
 ## Events Summary
 
 **Provider Intent**:
+
 - IntentRegistered
 - IntentUpdated
 - IntentExpired
 - IntentReleased
 
 **Orders**:
+
 - OrderCreated
 - OrderQueued
 
 **Proposals**:
+
 - SettlementProposalCreated
 - SettlementProposalAccepted
 - SettlementProposalRejected
 - SettlementProposalTimeout
 
 **Settlement**:
+
 - SettlementExecuted
 - OrderRefunded
 
 **Reputation**:
+
 - ProviderReputationUpdated
 - ProviderBlacklisted
 - ProviderFraudFlagged
 
 **Access Control**:
+
 - RoleGranted
 - RoleRevoked
 - ContractPaused
