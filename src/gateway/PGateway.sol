@@ -6,7 +6,8 @@ import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import { PGatewaySetting} from "./PGatewaySettings.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {PGatewaySettings} from "./PGatewaySettings.sol";
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 
 import {PayNodeAccessManager} from "../access/PAccessManager.sol";
@@ -17,13 +18,13 @@ import {PayNodeAccessManager} from "../access/PAccessManager.sol";
  * @dev Implements upgradeable pattern and uses external contracts for settings and access control
  */
 contract PGateway is
-    PGatewaySetting,
     Initializable,
     PausableUpgradeable,
     UUPSUpgradeable,
-    ReentrancyGuardUpgradeable,
     OwnableUpgradeable
 {
+    using SafeERC20 for IERC20;
+    using PGatewayStructs for *;
     // Access Manager and Settings
     PayNodeAccessManager public accessManager;
     PGatewaySettings public settings;
@@ -110,23 +111,22 @@ contract PGateway is
     /* ========== STATE VARIABLES ========== */
 
     // Core state variables
-    uint256 private constant MAX_BPS = 100_000;
+    // uint256 private constant MAX_BPS = 100_000;
 
     // Core Mappings
-    mapping(bytes32 => Order) public orders;
-    mapping(bytes32 => SettlementProposal) public proposals;
-    mapping(address => ProviderIntent) public providerIntents;
-    mapping(address => ProviderReputation) public providerReputation;
+    mapping(bytes32 => PGatewayStructs.Order) public orders;
+    mapping(bytes32 => PGatewayStructs.SettlementProposal) public proposals;
+    mapping(address => PGatewayStructs.ProviderIntent) public providerIntents;
+    mapping(address => PGatewayStructs.ProviderReputation) public providerReputation;
     mapping(address => uint256) public userNonce;
-    mapping(address => bool) public supportedTokens;
+    // mapping(address => bool) public supportedTokens;
     mapping(bytes32 => bool) public proposalExecuted;
 
     // Arrays for iteration
     address[] public registeredProviders;
     bytes32[] public activeOrderIds;
 
-    // Reserve for upgrades
-    uint256[50] private __gap;
+    
 
     /* ========== EVENTS ========== */
 
@@ -454,14 +454,13 @@ contract PGateway is
     /**
      * @notice Determine order tier based on amount
      */
-    function _determineTier(uint256 _amount) internal view returns (OrderTier) {
-        if (_amount < settings.SMALL_TIER_LIMIT()) {
-            return OrderTier.SMALL;
-        } else if (_amount < settings.MEDIUM_TIER_LIMIT()) {
-            return OrderTier.MEDIUM;
-        } else {
-            return OrderTier.LARGE;
-        }
+ 
+    function _determineTier(uint256 _amount) internal view returns (PGatewayStructs.OrderTier) {
+        if (_amount < settings.ALPHA_TIER_LIMIT()) return PGatewayStructs.OrderTier.ALPHA;
+        if (_amount < settings.BETA_TIER_LIMIT()) return PGatewayStructs.OrderTier.BETA;
+        if (_amount < settings.DELTA_TIER_LIMIT()) return PGatewayStructs.OrderTier.DELTA;
+        if (_amount < settings.OMEGA_TIER_LIMIT()) return PGatewayStructs.OrderTier.OMEGA;
+        return PGatewayStructs.OrderTier.TITAN;
     }
 
     /**
@@ -721,4 +720,8 @@ contract PGateway is
         require(balance > 0, "NoBalance");
         IERC20(_token).transfer(treasuryAddress, balance);
     }
+
+    // Reserve for upgrades
+  uint256[50] private __gap;
 }
+

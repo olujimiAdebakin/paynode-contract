@@ -17,6 +17,7 @@ contract PGatewaySettings is Initializable, OwnableUpgradeable {
     uint256 public orderExpiryWindow;
     uint256 public proposalTimeout;
     address public treasuryAddress;
+     uint256 public intentExpiry;
     address public aggregatorAddress;
 
     // Tier Limits
@@ -63,7 +64,8 @@ contract PGatewaySettings is Initializable, OwnableUpgradeable {
         uint256 _omegaLimit,
         uint256 _titanLimit,
         uint256 _orderExpiryWindow,
-        uint256 _proposalTimeout
+        uint256 _proposalTimeout,
+        uint256 _intentExpiry
     ) external initializer {
         __Ownable_init(initialOwner);
 
@@ -73,7 +75,7 @@ contract PGatewaySettings is Initializable, OwnableUpgradeable {
             _alphaLimit == 0 || _betaLimit <= _alphaLimit || _deltaLimit <= _betaLimit || _omegaLimit <= _deltaLimit
                 || _titanLimit <= _omegaLimit
         ) revert InvalidLimits();
-        if (_orderExpiryWindow == 0 || _proposalTimeout == 0) revert InvalidDuration();
+        if (_orderExpiryWindow == 0 || _proposalTimeout == 0 || _proposalTimeout > _orderExpiryWindow || _intentExpiry == 0) revert InvalidDuration();
 
         treasuryAddress = _treasury;
         aggregatorAddress = _aggregator;
@@ -85,6 +87,7 @@ contract PGatewaySettings is Initializable, OwnableUpgradeable {
         TITAN_TIER_LIMIT = _titanLimit;
         orderExpiryWindow = _orderExpiryWindow;
         proposalTimeout = _proposalTimeout;
+        intentExpiry = _intentExpiry;
 
         emit Initialized(initialOwner, _treasury, _aggregator, _protocolFee, _orderExpiryWindow, _proposalTimeout, _intentExpiry);
     }
@@ -93,7 +96,7 @@ contract PGatewaySettings is Initializable, OwnableUpgradeable {
     /// @param _newFee The new protocol fee in basis points (max 5000 = 5%)
     /// @dev Only callable by contract owner
     function setProtocolFee(uint64 _newFee) external onlyOwner {
-        if (_newFee > 5000) revert InvalidFee(); // Max 5%
+        if (_newFee > 500) revert InvalidFee(); // Max 5%
         protocolFeePercent = _newFee;
         emit ProtocolFeeUpdated(_newFee);
     }

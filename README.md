@@ -1,278 +1,170 @@
-# PayNode Protocol Contracts ⚡
+⚡ PayNode Smart Contract Protocol
 
-## Overview
-PayNode is a sophisticated non-custodial payment aggregation protocol designed for intelligent, parallel settlement routing across multiple off-chain liquidity providers. Built with Solidity, Foundry, and OpenZeppelin, this system minimizes transaction bottlenecks by simultaneously broadcasting settlement proposals to eligible providers, ensuring the fastest execution.
+Welcome to PayNode, a cutting-edge, non-custodial payment aggregation protocol built on Solidity. This system revolutionizes peer-to-peer and business settlements by intelligently routing transactions through a network of liquidity providers, enabling parallel execution for unparalleled speed and efficiency. Designed with robust security, upgradeability, and granular access control, PayNode ensures transparent and reliable on-chain operations.
 
-## Features
-*   ✨ **Parallel Settlement:** Enables multiple liquidity providers to race to accept and fulfill orders, optimizing for speed and efficiency.
-*   🔒 **Non-Custodial Escrow:** Funds are securely held in escrow within the smart contract until settlement, ensuring user assets are protected.
-*   🧠 **Tier-Based Intelligent Routing:** Leverages an off-chain aggregator to categorize orders by amount and route them to appropriate provider tiers, optimizing for capacity and reputation.
-*   ⚙️ **Upgradeable Architecture:** Implements the UUPS proxy pattern combined with a Timelock Controller for secure, governed contract upgrades with a mandatory 48-hour delay.
-*   🔑 **Role-Based Access Control (RBAC):** Granular permissions managed by `AccessManager`, assigning specific roles (Admin, Aggregator, Pauser) to control critical functions.
-*   🚫 **Provider Blacklisting & Reputation:** System for tracking provider performance, flagging fraudulent activity, and blacklisting malicious entities to maintain ecosystem integrity.
-*   ⏸️ **Emergency Pause:** A global pause mechanism for the entire protocol, allowing administrators to halt operations during emergencies or maintenance.
-*   🔗 **Chainlink Automation Integration:** Utilizes Chainlink Keepers (now Automation) for automated execution of scheduled upgrades and other time-sensitive tasks.
+---
 
-## Getting Started
+## 🚀 Overview
 
-To get started with the PayNode Protocol Contracts, follow the steps below to set up your local development environment and deploy the contracts.
+PayNode is a sophisticated smart contract suite providing a non-custodial payment aggregation layer. It connects users with multiple off-chain liquidity providers, facilitating intelligent, parallel settlement routing. Orders are broadcast simultaneously to eligible providers, with the first to accept executing the transaction, eliminating bottlenecks and optimizing transaction flow. The architecture leverages modular components for access control, configuration, and core gateway logic, all secured with a timelocked, upgradeable governance structure.
+
+---
+
+## ✨ Features
+
+*   **Non-Custodial Escrow**: User funds are securely held in escrow within the smart contract until a settlement is successfully executed or refunded, ensuring funds are never directly controlled by the protocol.
+*   **Parallel Settlement**: Settlement proposals are broadcast to multiple eligible liquidity providers simultaneously, allowing for competitive execution and faster transaction finalization.
+*   **Tier-Based Intelligent Routing**: Orders are dynamically categorized into tiers (Alpha, Beta, Delta, Omega, Titan) based on their value, enabling the off-chain aggregator to apply optimized routing strategies and select the most suitable providers.
+*   **Modular Architecture**: The protocol is designed with distinct, interconnected contract layers: `AccessManager` (permissions), `TimelockAdmin` (governance), `PGatewaySettings` (configuration), and `PGateway` (core logic).
+*   **Upgradeable & Secure Governance**: Utilizes the UUPS proxy pattern and a `TimelockAdmin` with a 48-hour delay for critical upgrades, preventing instant malicious changes and ensuring community oversight.
+*   **Role-Based Access Control (RBAC)**: Fine-grained permissions managed by `PayNodeAccessManager` define roles such as `ADMIN_ROLE`, `OPERATOR_ROLE`, `AGGREGATOR_ROLE`, and `FEE_MANAGER_ROLE` for enhanced security.
+*   **Provider Intent System**: Liquidity providers pre-register their available capacity, preferred fees, and commitment windows, allowing the aggregator to match orders efficiently.
+*   **Dynamic Reputation Scoring**: Tracks provider performance, including successful orders, settlement times, and no-show counts, to inform routing decisions and maintain network quality.
+*   **Emergency Pause & Blacklisting**: Critical safeguards include a global pause mechanism and a provider blacklisting system to mitigate risks and protect users during unforeseen events or fraudulent activity.
+*   **Chainlink Automation Integration**: Automated upkeep ensures timely execution of scheduled contract upgrades and other critical maintenance tasks via Chainlink Keepers.
+
+---
+
+## 🛠️ Technologies Used
+
+| Technology             | Description                                          |
+| :--------------------- | :--------------------------------------------------- |
+| **Solidity**           | Smart contract language for Ethereum and EVM chains. |
+| **Foundry**            | Fast, customizable, and comprehensive toolkit for Ethereum smart contract development (build, test, deploy, verify). |
+| **OpenZeppelin Contracts** | Industry-standard libraries for secure smart contract development (access control, upgradeability, utilities). |
+| **Chainlink Automation** | Decentralized, hyper-reliable automation for smart contracts. |
+
+---
+
+## 🚀 Getting Started
+
+Follow these steps to get your local development environment set up and interact with the PayNode smart contracts.
 
 ### Installation
-1.  **Clone the Repository:**
+
+1.  **Clone the Repository**:
+    Begin by cloning the PayNode contract repository to your local machine:
+
     ```bash
     git clone https://github.com/olujimiAdebakin/paynode-contract.git
     cd paynode-contract
     ```
 
-2.  **Install Foundry:**
-    If you don't have Foundry installed, follow the instructions on the official [Foundry Book](https://book.getfoundry.sh/getting-started/installation).
+2.  **Install Foundry**:
+    PayNode uses Foundry for its development workflow. If you don't have Foundry installed, follow the official instructions:
+
     ```bash
     curl -L https://foundry.paradigm.xyz | bash
     foundryup
     ```
 
-3.  **Install Dependencies:**
-    Foundry uses git submodules to manage dependencies. Initialize and update them:
+3.  **Install Dependencies**:
+    Navigate to the project directory and install the required OpenZeppelin and Chainlink submodules using `forge`:
+
     ```bash
-    forge update
+    forge install
     ```
 
-4.  **Build Contracts:**
-    Compile the smart contracts using `forge build`:
+4.  **Build the Contracts**:
+    Compile the smart contracts to ensure everything is set up correctly:
+
     ```bash
     forge build
     ```
-    This will compile all `.sol` files in the `src` directory and output artifacts to `out/`.
 
 ### Environment Variables
-While direct environment variables aren't typically configured *within* Solidity contracts for deployment, a deployment script (which would usually be in a separate `script` directory in a Foundry project) would require the following:
 
-*   `PRIVATE_KEY`: Private key of the deployer address (e.g., `0x...`)
-*   `RPC_URL`: RPC endpoint for the network to deploy to (e.g., `https://mainnet.infura.io/v3/YOUR_PROJECT_ID`)
+While local testing often doesn't require extensive `.env` files, for deployment or more complex local networks, you might need variables like `RPC_URL` and `PRIVATE_KEY`.
 
-**Example `.env` file structure (for deployment scripts):**
+---
+
+## 💡 Usage
+
+This section guides you through deploying and interacting with the PayNode protocol.
+
+### Local Development and Testing
+
+You can run the automated tests to verify the contract logic and functionality:
+
+```bash
+forge test
 ```
-PRIVATE_KEY="0xac0974bec39a17e36ba4a6b4d238ff944bac478cbf5e7bb81002084ee5113076" # Example: Anvil private key
-RPC_URL="http://127.0.0.1:8545" # Example: Anvil local RPC
+
+### Deployment Flow
+
+The `PayNode.sol` contract in `src/main` acts as a central deployment script, orchestrating the deployment and initialization of all core PayNode components in a specific order:
+
+1.  **Deploy `PayNodeAccessManager`**: The foundation for role-based access control and system state.
+2.  **Deploy `PayNodeAdmin` (Timelock)**: The governance contract responsible for managing upgrades with a timelock.
+3.  **Deploy `PGatewaySettings`**: Configures protocol-wide parameters like fees, tier limits, and treasury addresses.
+4.  **Deploy `PGateway` (Implementation)**: The actual logic contract for the payment gateway.
+5.  **Deploy `ERC1967Proxy` for `PGateway`**: Sets up the upgradeable proxy pointing to the `PGateway` implementation.
+6.  **Transfer Ownership**: Key ownership roles (e.g., `PayNodeAccessManager`, `PGatewaySettings`) are transferred to the `TimelockAdmin` for decentralized, timelocked governance.
+
+You can simulate this deployment locally using Foundry's scripting capabilities:
+
+```bash
+# Example: Deploy to a local Anvil instance
+# Start Anvil: anvil
+# Then run the script:
+forge script script/DeployPayNode.s.sol --rpc-url http://127.0.0.1:8545 --private-key <YOUR_PRIVATE_KEY> --broadcast
 ```
 
-## Usage
+### Protocol Interaction
 
-The PayNode Protocol consists of several interconnected smart contracts designed for robust, secure, and upgradeable operation. Below are instructions on deploying the system and interacting with its core components.
+The PayNode protocol involves several key roles:
 
-### 🚀 Deploying the Entire System
+*   **User**: Initiates payment orders.
+*   **Provider**: Offers liquidity, registers intent, and accepts/rejects settlement proposals.
+*   **Aggregator**: An off-chain entity responsible for determining order tiers, routing proposals to providers, and executing settlements.
+*   **Admin**: Manages system flags, blacklists, and schedules upgrades via the timelock.
 
-The `PayNode.sol` contract acts as a central deployer for the entire protocol stack. This streamlines the initial setup process.
+Here's a high-level interaction flow:
 
-1.  **Start a Local Blockchain (e.g., Anvil):**
-    Open a new terminal and run:
-    ```bash
-    anvil
-    ```
-    This will provide a local RPC endpoint (e.g., `http://127.0.0.1:8545`) and accounts with pre-funded ETH.
+1.  **Provider Registers Intent**:
+    A liquidity provider uses the `registerIntent` function on `PGateway` to declare their available capacity, supported currency, fee range, and commitment window.
+2.  **User Creates Order**:
+    A user calls `createOrder` on `PGateway`, specifying the token, amount, and a refund address. Their funds are transferred into the gateway's escrow.
+3.  **Aggregator Creates Proposal**:
+    The off-chain aggregator identifies suitable providers based on the order's tier and available intents. It then calls `createProposal` on `PGateway` for multiple providers simultaneously.
+4.  **Provider Accepts Proposal**:
+    The first provider to respond accepts a proposal via `acceptProposal` on `PGateway`. This locks the order to that provider and updates the order status.
+5.  **Aggregator Executes Settlement**:
+    Once a proposal is accepted, the aggregator calls `executeSettlement` on `PGateway`. This triggers the transfer of the protocol fee to the treasury and the remaining amount to the fulfilling provider, marking the order as fulfilled.
+6.  **Refunds**:
+    If an order expires without acceptance or is manually canceled by the user (within specific conditions), the `refundOrder` or `requestRefund` functions can be called to return funds to the user.
 
-2.  **Deploy `PayNode.sol` and the Ecosystem:**
-    You would typically write a deployment script (e.g., in `script/DeployPayNode.s.sol`) that uses `forge script`. For demonstration, here’s a conceptual interaction:
-    ```solidity
-    // Example conceptual deployment script logic in a Foundry script
-    import "forge-std/Script.sol";
-    import "../src/main/PayNode.sol";
-    import "../src/interface/IAccessManager.sol";
-    import "../src/interface/IPGatewaySettings.sol";
-    import "../src/interface/IPGateway.sol";
-    
-    contract DeployPayNode is Script {
-        function run() external returns (address accessManager, address timelockAdmin, address gatewaySettings, address gatewayProxy) {
-            vm.startBroadcast();
-    
-            address _owner = vm.addr(0x70997970C51812dc3A01088e6d492B4eecbAb809); // Anvil default account 0
-            address _aggregator = vm.addr(0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC); // Anvil default account 1
-            address _treasury = vm.addr(0x90F79bf6EB2c4f870365E011ee64d530DFdC3a0D); // Anvil default account 2
-    
-            PayNode deployer = new PayNode();
-            deployer.deploySystem(_owner, _aggregator, _treasury);
-    
-            accessManager = deployer.accessManager();
-            timelockAdmin = deployer.timelockAdmin();
-            gatewaySettings = deployer.gatewaySettings();
-            gatewayProxy = deployer.gatewayProxy();
-    
-            console.log("AccessManager deployed at:", accessManager);
-            console.log("TimelockAdmin deployed at:", timelockAdmin);
-            console.log("PGatewaySettings deployed at:", gatewaySettings);
-            console.log("PGateway (Proxy) deployed at:", gatewayProxy);
-    
-            vm.stopBroadcast();
-        }
-    }
-    ```
-    To run a script like this with `forge`:
-    ```bash
-    forge script script/DeployPayNode.s.sol:DeployPayNode --rpc-url http://127.0.0.1:8545 --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bac478cbf5e7bb81002084ee5113076 --broadcast
-    ```
-    Replace `0xac0974bec39a17e36ba4a6b4d238ff944bac478cbf5e7bb81002084ee5113076` with a private key from your Anvil output that corresponds to the `_owner` address.
+---
 
-### 📝 Interacting with Core Contracts
+## 🤝 Contributing
 
-After deployment, you interact with the proxy address for the `PGateway` and the directly deployed `AccessManager` and `PGatewaySettings` contracts.
+We welcome contributions to the PayNode Smart Contract Protocol! To contribute:
 
-#### **PayNodeAccessManager (RBAC & System Control)**
-The `AccessManager` handles critical roles, blacklisting, and emergency controls.
+*   **Fork the repository**.
+*   **Create a new branch** for your feature or bug fix.
+*   **Write clean, well-documented code** following existing coding standards.
+*   **Ensure all tests pass** (`forge test`) and add new tests for your changes.
+*   **Submit a pull request** with a clear description of your changes.
 
-*   **Granting Roles:**
-    Only the `DEFAULT_ADMIN_ROLE` can grant or revoke roles.
-    ```solidity
-    // Example: Grant AGGREGATOR_ROLE to an address
-    // Assuming 'accessManagerContract' is an instance of IPayNodeAccessManager
-    function grantAggregatorRole(IPayNodeAccessManager accessManagerContract, address newAggregatorAddress) public {
-        bytes32 aggregatorRole = accessManagerContract.AGGREGATOR_ROLE();
-        accessManagerContract.grantRole(aggregatorRole, newAggregatorAddress);
-    }
-    ```
-*   **Blacklisting a User:**
-    An `OPERATOR_ROLE` holder can blacklist users.
-    ```solidity
-    // Example: Blacklist a user
-    // Assuming 'accessManagerContract' is an instance of IPayNodeAccessManager
-    function blacklistUser(IPayNodeAccessManager accessManagerContract, address userToBlacklist) public {
-        accessManagerContract.setBlacklistStatus(userToBlacklist, true);
-    }
-    ```
-*   **Emergency Shutdown:**
-    Only the `DEFAULT_ADMIN_ROLE` can initiate an emergency shutdown.
-    ```solidity
-    // Example: Trigger emergency shutdown
-    // Assuming 'accessManagerContract' is an instance of IPayNodeAccessManager
-    function triggerShutdown(IPayNodeAccessManager accessManagerContract) public {
-        accessManagerContract.emergencyShutdown();
-    }
-    ```
+---
 
-#### **PGatewaySettings (Protocol Configuration)**
-This contract centralizes configurable parameters for the PayNode Gateway.
+## 📄 License
 
-*   **Setting Protocol Fees:**
-    Only the `owner` (initially `TimelockAdmin` after deployment) can set fees.
-    ```solidity
-    // Example: Set protocol fee to 0.1% (100 bps)
-    // Assuming 'gatewaySettingsContract' is an instance of IPGatewaySettings
-    function setFees(IPGatewaySettings gatewaySettingsContract, uint64 newFeeBps) public {
-        gatewaySettingsContract.setProtocolFee(newFeeBps); // e.g., 100 for 0.1%
-    }
-    ```
-*   **Managing Supported Tokens:**
-    ```solidity
-    // Example: Add USDC as a supported token
-    // Assuming 'gatewaySettingsContract' is an instance of IPGatewaySettings
-    function addSupportedToken(IPGatewaySettings gatewaySettingsContract, address usdcAddress) public {
-        gatewaySettingsContract.setSupportedToken(usdcAddress, true);
-    }
-    ```
+This project is released under the MIT License, as indicated by SPDX identifiers within the source code.
 
-#### **PGateway (Core Payment Logic - via Proxy)**
-This is the main contract for order creation, provider interaction, and settlement. All interactions should be with the deployed proxy address of `PGateway`.
+---
 
-*   **Registering Provider Intent:**
-    A liquidity provider registers their capacity and terms.
-    ```solidity
-    // Example: A provider registers intent
-    // Assuming 'gatewayProxyContract' is an instance of IPGateway
-    function registerProviderIntent(
-        IPGateway gatewayProxyContract,
-        string calldata currency,
-        uint256 availableAmount,
-        uint64 minFeeBps,
-        uint64 maxFeeBps,
-        uint256 commitmentWindow
-    ) public {
-        gatewayProxyContract.registerIntent(currency, availableAmount, minFeeBps, maxFeeBps, commitmentWindow);
-    }
-    ```
-*   **Creating an Order:**
-    A user initiates a payment order.
-    ```solidity
-    // Example: A user creates an order for 100 USDC
-    // Assuming 'gatewayProxyContract' is an instance of IPGateway
-    function createUserOrder(
-        IPGateway gatewayProxyContract,
-        address usdcAddress, // ERC20 token address
-        uint256 amount,
-        address refundAddress,
-        string calldata messageHash // A hash of an off-chain message/payload
-    ) public returns (bytes32 orderId) {
-        // IMPORTANT: User must first approve the gatewayProxyContract to spend `amount` of `usdcAddress` tokens
-        // IERC20(usdcAddress).approve(address(gatewayProxyContract), amount);
-        orderId = gatewayProxyContract.createOrder(usdcAddress, amount, refundAddress, messageHash);
-    }
-    ```
-*   **Creating a Settlement Proposal (by Aggregator):**
-    The off-chain aggregator identifies a provider and creates a proposal.
-    ```solidity
-    // Example: Aggregator proposes settlement
-    // Assuming 'gatewayProxyContract' is an instance of IPGateway
-    function createSettlementProposal(
-        IPGateway gatewayProxyContract,
-        bytes32 orderId,
-        address providerAddress,
-        uint64 proposedFeeBps
-    ) public returns (bytes32 proposalId) {
-        // This call must come from the designated aggregator address
-        proposalId = gatewayProxyContract.createProposal(orderId, providerAddress, proposedFeeBps);
-    }
-    ```
-*   **Accepting a Proposal (by Provider):**
-    A provider accepts a proposal to fulfill an order.
-    ```solidity
-    // Example: A provider accepts a proposal
-    // Assuming 'gatewayProxyContract' is an instance of IPGateway
-    function providerAcceptsProposal(IPGateway gatewayProxyContract, bytes32 proposalId) public {
-        // This call must come from the designated provider address
-        gatewayProxyContract.acceptProposal(proposalId);
-    }
-    ```
-*   **Executing Settlement (by Aggregator):**
-    After acceptance, the aggregator triggers the final fund transfer.
-    ```solidity
-    // Example: Aggregator executes settlement
-    // Assuming 'gatewayProxyContract' is an instance of IPGateway
-    function executeOrderSettlement(IPGateway gatewayProxyContract, bytes32 proposalId) public {
-        // This call must come from the designated aggregator address
-        gatewayProxyContract.executeSettlement(proposalId);
-    }
-    ```
+## 👤 Author
 
-## Technologies Used
-The PayNode Protocol is built upon a robust stack of leading Web3 development tools and libraries.
-
-| Technology                   | Description                                                                     | Link                                                                |
-| :--------------------------- | :------------------------------------------------------------------------------ | :------------------------------------------------------------------ |
-| **Solidity**                 | Object-oriented, high-level language for implementing smart contracts.          | [Solidity Lang](https://soliditylang.org/)                          |
-| **Foundry**                  | Fast, portable, and modular toolkit for Ethereum application development.       | [Foundry Book](https://book.getfoundry.sh/)                         |
-| **OpenZeppelin Contracts**   | Secure, community-vetted smart contract building blocks for Ethereum.           | [OpenZeppelin Docs](https://docs.openzeppelin.com/contracts/4.x/) |
-| **Chainlink Automation**     | Decentralized services to automate smart contract functions on pre-set conditions. | [Chainlink Automation](https://docs.chain.link/chainlink-automation/) |
-
-## Contributing
-We welcome contributions to the PayNode Protocol! If you're interested in improving the system, please follow these guidelines:
-
-*   💡 **Suggest Features:** Open an issue to propose new features or improvements.
-*   🐞 **Report Bugs:** If you find a bug, please open an issue with a detailed description and steps to reproduce.
-*   🛠️ **Submit Pull Requests:**
-    *   Fork the repository.
-    *   Create a new branch for your feature or bug fix.
-    *   Write clean, well-commented code.
-    *   Ensure your code passes all tests (`forge test`).
-    *   Submit a pull request with a clear description of your changes.
-
-## License
-This project's smart contracts are released under the MIT License, as specified by their `SPDX-License-Identifier` headers.
-
-## Author
 **Olujimi**
-*   LinkedIn: [Your LinkedIn Profile](https://linkedin.com/in/YOUR_LINKEDIN_USERNAME)
-*   Twitter: [Your Twitter Handle](https://twitter.com/YOUR_TWITTER_HANDLE)
 
-## Badges
-[![Solidity v0.8.24](https://img.shields.io/badge/Solidity-v0.8.24-lightgray)](https://soliditylang.org/)
-[![Built with Foundry](https://img.shields.io/badge/Built%20with-Foundry-red)](https://getfoundry.sh/)
-[![Uses OpenZeppelin](https://img.shields.io/badge/Uses-OpenZeppelin%20Contracts-blue)](https://docs.openzeppelin.com/contracts/4.x/)
+*   LinkedIn: [https://www.linkedin.com/in/YOUR_LINKEDIN_USERNAME](https://www.linkedin.com/in/YOUR_LINKEDIN_USERNAME)
+*   Twitter: [https://twitter.com/YOUR_TWITTER_USERNAME](https://twitter.com/YOUR_TWITTER_USERNAME)
+
+---
+
+[![Solidity](https://img.shields.io/badge/Solidity-^0.8.18-blue)](https://docs.soliditylang.org/)
+[![Foundry](https://img.shields.io/badge/Build%20with-Foundry-red)](https://getfoundry.sh/)
+[![OpenZeppelin](https://img.shields.io/badge/Powered%20by-OpenZeppelin-lightgray)](https://docs.openzeppelin.com/contracts/4.x/)
+
 [![Readme was generated by Dokugen](https://img.shields.io/badge/Readme%20was%20generated%20by-Dokugen-brightgreen)](https://www.npmjs.com/package/dokugen)
