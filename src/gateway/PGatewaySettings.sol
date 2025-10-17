@@ -30,6 +30,7 @@ contract PGatewaySettings is Initializable, OwnableUpgradeable {
     mapping(address => bool) public supportedTokens;
 
     // Events
+     event Initialized(address owner, address treasury, address aggregator, uint64 fee, uint256 expiry, uint256 timeout, uint256 intentExpiry);
     event ProtocolFeeUpdated(uint64 newFee);
     event TierLimitsUpdated(
         uint256 alphaLimit, uint256 betaLimit, uint256 deltaLimit, uint256 omegaLimit, uint256 titanLimit
@@ -84,6 +85,8 @@ contract PGatewaySettings is Initializable, OwnableUpgradeable {
         TITAN_TIER_LIMIT = _titanLimit;
         orderExpiryWindow = _orderExpiryWindow;
         proposalTimeout = _proposalTimeout;
+
+        emit Initialized(initialOwner, _treasury, _aggregator, _protocolFee, _orderExpiryWindow, _proposalTimeout, _intentExpiry);
     }
 
     /// @notice Updates the protocol fee percentage

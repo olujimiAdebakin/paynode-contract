@@ -38,7 +38,11 @@ contract PayNodeAccessManager is
     /// @notice Role identifier for trusted backend services and AI agents (e.g., Xiara, Shogun, Xena)
     ///         that need to perform automated, programmatic interactions with smart contracts.
     bytes32 public constant PLATFORM_SERVICE_ROLE = keccak256("PLATFORM_SERVICE_ROLE");
-
+        /// @notice Role identifier for the PayNode aggregator contract, which coordinates liquidity providers
+        ///         and handles order routing within the PayNode ecosystem.
+    bytes32 public constant AGGREGATOR_ROLE = keccak256("AGGREGATOR_ROLE");
+    /// @notice Role identifier for entities authorized to manage protocol fees and fee distribution.
+    bytes32 public constant FEE_MANAGER_ROLE = keccak256("FEE_MANAGER_ROLE");
     // ============================
     // Custom Errors
     // ============================
@@ -176,6 +180,10 @@ contract PayNodeAccessManager is
 
         // The ADMIN_ROLE is assigned to the PasarAdmin contract, which manages upgrades.
         _grantRole(ADMIN_ROLE, pasarAdmin);
+        emit RoleAssigned(pasarAdmin, ADMIN_ROLE, msg.sender); // Logs the role assignment.
+
+        // The FEE_MANAGER_ROLE is also assigned to the PasarAdmin for fee management.
+        _grantRole(FEE_MANAGER_ROLE, _pasarAdmin);
         emit RoleAssigned(pasarAdmin, ADMIN_ROLE, msg.sender); // Logs the role assignment.
 
         // Grant Operator Roles: Iterates through the provided list of operators and grants them the OPERATOR_ROLE.
@@ -382,14 +390,16 @@ contract PayNodeAccessManager is
     ///         assigned to a given address.
     /// @dev This function iterates through a predefined list of roles and checks if the account has each.
     /// @param account The address to check.
-    /// @return An array of bytes32 role identifiers held by the account.
+    /// @return roles An array of bytes32 role identifiers held by the account.
     function getAccountRoles(address account) external view returns (bytes32[] memory roles) {
         // Define all roles to check.
         bytes32[] memory allRoles = new bytes32[](4);
-        allRoles[0] = DEFAULT_ADMIN_ROLE; // Include DEFAULT_ADMIN_ROLE for completeness.
+        allRoles[0] = DEFAULT_ADMIN_ROLE; // Included DEFAULT_ADMIN_ROLE for completeness.
         allRoles[1] = ADMIN_ROLE;
         allRoles[2] = OPERATOR_ROLE;
         allRoles[3] = PLATFORM_SERVICE_ROLE;
+        allRoles[4] = AGGREGATOR_ROLE;
+        allRoles[5] = FEE_MANAGER_ROLE;
 
         uint256 count = 0;
         // Count how many roles the account has.
@@ -414,7 +424,7 @@ contract PayNodeAccessManager is
     /// @dev This public view function allows external parties to verify the timelock status
     ///      of a pending admin change before attempting to execute it.
     /// @param operationId The unique identifier of the pending admin change to check.
-    /// @return True if the operation exists and its `scheduleTime` has passed, false otherwise.
+    /// @return ready True if the operation exists and its `scheduleTime` has passed, false otherwise.
     function isAdminChangeReady(bytes32 operationId) public view returns (bool ready) {
         PendingAdminChange memory change = pendingAdminChanges[operationId];
         return change.exists && block.timestamp >= change.scheduleTime;

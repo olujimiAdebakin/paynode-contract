@@ -6,10 +6,10 @@ import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "./PGatewaySettings.sol";
+import { PGatewaySetting} from "./PGatewaySettings.sol";
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 
-import {PayNodeAccessManager} from "./PAccessManager.sol";
+import {PayNodeAccessManager} from "../access/PAccessManager.sol";
 
 /**
  * @title PayNode Gateway
@@ -17,6 +17,7 @@ import {PayNodeAccessManager} from "./PAccessManager.sol";
  * @dev Implements upgradeable pattern and uses external contracts for settings and access control
  */
 contract PGateway is
+    PGatewaySetting,
     Initializable,
     PausableUpgradeable,
     UUPSUpgradeable,
@@ -30,9 +31,11 @@ contract PGateway is
     /* ========== ENUMS ========== */
 
     enum OrderTier {
-        SMALL, // < 5,000 units
-        MEDIUM, // 5,000 - 20,000 units
-        LARGE // > 20,000 units
+        ALPHA,
+        BETA,
+        DELTA,
+        OMEGA,
+        TITAN  //> 20,000 units
 
     }
 
@@ -53,56 +56,56 @@ contract PGateway is
         CANCELLED
     }
 
-    /* ========== STRUCTS ========== */
+    // /* ========== STRUCTS ========== */
 
-    struct ProviderIntent {
-        address provider;
-        string currency;
-        uint256 availableAmount;
-        uint64 minFeeBps;
-        uint64 maxFeeBps;
-        uint256 registeredAt;
-        uint256 expiresAt;
-        uint256 commitmentWindow;
-        bool isActive;
-    }
+    // struct ProviderIntent {
+    //     address provider;
+    //     string currency;
+    //     uint256 availableAmount;
+    //     uint64 minFeeBps;
+    //     uint64 maxFeeBps;
+    //     uint256 registeredAt;
+    //     uint256 expiresAt;
+    //     uint256 commitmentWindow;
+    //     bool isActive;
+    // }
 
-    struct Order {
-        bytes32 orderId;
-        address user;
-        address token;
-        uint256 amount;
-        OrderTier tier;
-        OrderStatus status;
-        address refundAddress;
-        uint256 createdAt;
-        uint256 expiresAt;
-        bytes32 acceptedProposalId;
-        address fulfilledByProvider;
-    }
+    // struct Order {
+    //     bytes32 orderId;
+    //     address user;
+    //     address token;
+    //     uint256 amount;
+    //     OrderTier tier;
+    //     OrderStatus status;
+    //     address refundAddress;
+    //     uint256 createdAt;
+    //     uint256 expiresAt;
+    //     bytes32 acceptedProposalId;
+    //     address fulfilledByProvider;
+    // }
 
-    struct SettlementProposal {
-        bytes32 proposalId;
-        bytes32 orderId;
-        address provider;
-        uint256 proposedAmount;
-        uint64 proposedFeeBps;
-        uint256 proposedAt;
-        uint256 proposalDeadline;
-        ProposalStatus status;
-    }
+    // struct SettlementProposal {
+    //     bytes32 proposalId;
+    //     bytes32 orderId;
+    //     address provider;
+    //     uint256 proposedAmount;
+    //     uint64 proposedFeeBps;
+    //     uint256 proposedAt;
+    //     uint256 proposalDeadline;
+    //     ProposalStatus status;
+    // }
 
-    struct ProviderReputation {
-        address provider;
-        uint256 totalOrders;
-        uint256 successfulOrders;
-        uint256 failedOrders;
-        uint256 noShowCount;
-        uint256 totalSettlementTime;
-        uint256 lastUpdated;
-        bool isFraudulent;
-        bool isBlacklisted;
-    }
+    // struct ProviderReputation {
+    //     address provider;
+    //     uint256 totalOrders;
+    //     uint256 successfulOrders;
+    //     uint256 failedOrders;
+    //     uint256 noShowCount;
+    //     uint256 totalSettlementTime;
+    //     uint256 lastUpdated;
+    //     bool isFraudulent;
+    //     bool isBlacklisted;
+    // }
 
     /* ========== STATE VARIABLES ========== */
 
@@ -225,7 +228,7 @@ contract PGateway is
         __UUPSUpgradeable_init();
         __Ownable_init();
 
-        accessManager = PAccessManager(_accessManager);
+        accessManager = accessManager(_accessManager);
         settings = PGatewaySettings(_settings);
     }
 
@@ -405,7 +408,7 @@ contract PGateway is
      * @param _amount Order amount
      * @param _refundAddress Address to refund if order fails
      */
-    function createOrder(address _token, uint256 _amount, address _refundAddress)
+    function createOrder(address _token, uint256 _amount, address _refundAddress, string messageHash)
         external
         whenNotPaused
         nonReentrant
