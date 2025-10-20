@@ -133,7 +133,8 @@ contract PGateway is Initializable, PausableUpgradeable, UUPSUpgradeable {
         uint256 amount,
         uint64 feeBps,
         uint256 protocolFee,
-        uint46 integratorFee
+        uint256 integratorFee,
+        uint256 providerFee
     );
 
     /// @notice Emitted when an order is refunded
@@ -507,8 +508,27 @@ contract PGateway is Initializable, PausableUpgradeable, UUPSUpgradeable {
 
     /* ========== SETTLEMENT EXECUTION FUNCTIONS ========== */
 
-    /// @notice Executes settlement after proposal acceptance
-    /// @param _proposalId Accepted proposal ID
+    /// @notice Executes settlement after proposal acceptance and distributes funds from escrow
+/// @dev Settlement Flow:
+///      1. Validates proposal is ACCEPTED and not already executed
+///      2. Validates associated order is in ACCEPTED status
+///      3. Calculates all fees from the proposed amount:
+///         - Protocol fee: Platform's fee sent to treasury
+///         - Integrator fee: dApp's fee (set by integrator) sent to integrator address
+///         - Provider fee: Provider's margin (calculated for tracking, not transferred separately)
+///      4. Distributes escrowed funds:
+///         - Protocol fee → Treasury
+///         - Integrator fee → Integrator
+///         - Remaining amount → Provider (who sends fiat to user off-chain)
+///      5. Marks proposal as executed and order as FULFILLED
+///      6. Updates provider success metrics
+///      7. Emits settlement event with full breakdown
+///      
+///      Note: Provider's margin (providerFee) is earned through their exchange rate markup
+///      off-chain and is not deducted as a separate transfer. The provider receives the
+///      remaining amount after protocol and integrator fees are deducted.
+///
+/// @param _proposalId The ID of the accepted proposal to execute settlement for
     function executeSettlement(bytes32 _proposalId) external onlyAggregator {
         require(accessManager.executeAggregatorNonReentrant(msg.sender), "Unauthorized");
         PGatewayStructs.SettlementProposal storage proposal = proposals[_proposalId];
@@ -518,10 +538,10 @@ contract PGateway is Initializable, PausableUpgradeable, UUPSUpgradeable {
         PGatewayStructs.Order storage order = orders[proposal.orderId];
         require(order.status == PGatewayStructs.OrderStatus.ACCEPTED, "InvalidOrder");
 
-        uint256 integratorFee = (proposal.proposedAmount * settings.integratorFeePercent()) / settings.MAX_BPS();
+        uint256 integratorFee = (proposal.proposedAmount * order.integratorFee) / settings.MAX_BPS();
         uint256 protocolFee = (proposal.proposedAmount * settings.protocolFeePercent()) / settings.MAX_BPS();
         uint256 providerFee = (proposal.proposedAmount * proposal.proposedFeeBps) / settings.MAX_BPS();
-        uint256 providerAmount = proposal.proposedAmount - protocolFee;
+        uint256 providerAmount = proposal.proposedAmount - protocolFee - integratorFee;
 
         IERC20(order.token).safeTransfer(settings.treasuryAddress(), protocolFee);
         IERC20(order.token).safeTransfer(order.integrator, integratorFee);
@@ -533,7 +553,7 @@ contract PGateway is Initializable, PausableUpgradeable, UUPSUpgradeable {
         _updateProviderSuccess(proposal.provider, block.timestamp - proposal.proposedAt);
 
         emit SettlementExecuted(
-            proposal.orderId, _proposalId, proposal.provider, providerAmount, proposal.proposedFeeBps, protocolFee, integratorFee
+            proposal.orderId, _proposalId, proposal.provider, providerAmount, proposal.proposedFeeBps, protocolFee, integratorFee, providerFee
         );
     }
 
