@@ -4,7 +4,7 @@ pragma solidity ^0.8.18;
 /**
  * @title IPGatewaySettings
  * @notice Interface for configuring and managing PayNode Gateway protocol parameters.
- * @dev Defines administrative and configuration methods for managing protocol fees, 
+ * @dev Defines administrative and configuration methods for managing protocol fees,
  * tier limits, expiry windows, and supported tokens. Only callable by governance or authorized admin.
  * @author Olujimi
  */
@@ -13,11 +13,26 @@ interface IPGatewaySettings {
     // Events
     // ============================
 
+    event Initialized(
+        address accessManager,
+        address treasury,
+        address aggregator,
+        uint64 fee,
+        uint64 maxFee,
+        uint256 expiry,
+        uint256 timeout,
+        uint256 intentExpiry
+    );
+
     /**
      * @notice Emitted when the protocol fee percentage is updated.
      * @param newFee The new protocol fee value in basis points (bps).
      */
     event ProtocolFeeUpdated(uint64 newFee);
+
+    event MaxProtocolFeeUpdated(uint64 newMaxFee);
+
+    event IntentExpiryUpdated(uint256 newExpiry);
 
     /**
      * @notice Emitted when all tier limits are updated.
@@ -28,11 +43,7 @@ interface IPGatewaySettings {
      * @param titanLimit Maximum transaction limit for Titan tier.
      */
     event TierLimitsUpdated(
-        uint256 alphaLimit,
-        uint256 betaLimit,
-        uint256 deltaLimit,
-        uint256 omegaLimit,
-        uint256 titanLimit
+        uint256 alphaLimit, uint256 betaLimit, uint256 deltaLimit, uint256 omegaLimit, uint256 titanLimit
     );
 
     /**
@@ -117,6 +128,12 @@ interface IPGatewaySettings {
      * @param _newWindow The new expiry window in seconds.
      */
     function setOrderExpiryWindow(uint256 _newWindow) external;
+    function integratorAddress() external view returns (address);
+    function integratorFeePercent() external view returns (uint64);
+    function setIntentExpiry(uint256 _newExpiry) external;
+    function intentExpiry() external view returns (uint256);
+
+    function setMaxProtocolFee(uint64 _newMaxFee) external;
 
     /**
      * @notice Sets the proposal timeout duration.
@@ -163,6 +180,9 @@ interface IPGatewaySettings {
 
     /// @notice Returns the configured order expiry window duration in seconds.
     function orderExpiryWindow() external view returns (uint256);
+
+    ///
+    function maxProtocolFee() external view returns (uint64);
 
     /// @notice Returns the proposal timeout duration in seconds.
     function proposalTimeout() external view returns (uint256);

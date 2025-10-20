@@ -38,8 +38,8 @@ contract PayNodeAccessManager is
     /// @notice Role identifier for trusted backend services and AI agents (e.g., Xiara, Shogun, Xena)
     ///         that need to perform automated, programmatic interactions with smart contracts.
     bytes32 public constant PLATFORM_SERVICE_ROLE = keccak256("PLATFORM_SERVICE_ROLE");
-        /// @notice Role identifier for the PayNode aggregator contract, which coordinates liquidity providers
-        ///         and handles order routing within the PayNode ecosystem.
+    /// @notice Role identifier for the PayNode aggregator contract, which coordinates liquidity providers
+    ///         and handles order routing within the PayNode ecosystem.
     bytes32 public constant AGGREGATOR_ROLE = keccak256("AGGREGATOR_ROLE");
     /// @notice Role identifier for entities authorized to manage protocol fees and fee distribution.
     bytes32 public constant FEE_MANAGER_ROLE = keccak256("FEE_MANAGER_ROLE");

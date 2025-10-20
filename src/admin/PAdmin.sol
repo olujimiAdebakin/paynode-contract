@@ -153,7 +153,7 @@ contract PayNodeAdmin is TimelockController, AutomationCompatibleInterface, Reen
     /// @notice Initializes the contract with roles, timelock, and Chainlink Keeper settings.
     /// @param proposers Addresses allowed to propose timelocked operations.
     /// @param executors Addresses allowed to execute timelocked operations.
-    /// @param admin Address to receive ADMIN_ROLE and DEFAULT_ADMIN_ROLE.
+    /// @param superAdmin Address to receive ADMIN_ROLE and DEFAULT_ADMIN_ROLE.
     /// @param _chainlinkKeeper Address of the Chainlink Keeper for automation.
     constructor(
         address[] memory proposers,

@@ -3,115 +3,26 @@ pragma solidity ^0.8.18;
 
 import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IPGatewaySettings} from "../interface/IPGatewaySettings.sol";
+import {IPayNodeAccessManager} from "../interface/IAccessManager.sol";
 import {PGatewaySettings} from "./PGatewaySettings.sol";
-import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "./PGatewayStructs.sol";
-import {PayNodeAccessManager} from "../access/PAccessManager.sol";
 
 /**
  * @title PayNode Gateway
  * @notice Non-custodial payment aggregator with parallel settlement and provider intent registry
- * @dev Implements upgradeable pattern and uses external contracts for settings and access control
+ * @dev Implements upgradeable pattern, uses IPayNodeAccessManager for access control and reentrancy protection,
+ *      and IPGatewaySettings for configuration. Uses PGatewayStructs for shared data structures.
  */
-contract PGateway is
-    Initializable,
-    PausableUpgradeable,
-    UUPSUpgradeable,
-    OwnableUpgradeable
-{
+contract PGateway is Initializable, PausableUpgradeable, UUPSUpgradeable {
     using SafeERC20 for IERC20;
-    using PGatewayStructs for *;
+
     // Access Manager and Settings
-    PayNodeAccessManager public accessManager;
-    PGatewaySettings public settings;
-
-    /* ========== ENUMS ========== */
-
-    enum OrderTier {
-        ALPHA,
-        BETA,
-        DELTA,
-        OMEGA,
-        TITAN  //> 20,000 units
-
-    }
-
-    enum OrderStatus {
-        PENDING,
-        PROPOSED,
-        ACCEPTED,
-        FULFILLED,
-        REFUNDED,
-        CANCELLED
-    }
-
-    enum ProposalStatus {
-        PENDING,
-        ACCEPTED,
-        REJECTED,
-        TIMEOUT,
-        CANCELLED
-    }
-
-    // /* ========== STRUCTS ========== */
-
-    // struct ProviderIntent {
-    //     address provider;
-    //     string currency;
-    //     uint256 availableAmount;
-    //     uint64 minFeeBps;
-    //     uint64 maxFeeBps;
-    //     uint256 registeredAt;
-    //     uint256 expiresAt;
-    //     uint256 commitmentWindow;
-    //     bool isActive;
-    // }
-
-    // struct Order {
-    //     bytes32 orderId;
-    //     address user;
-    //     address token;
-    //     uint256 amount;
-    //     OrderTier tier;
-    //     OrderStatus status;
-    //     address refundAddress;
-    //     uint256 createdAt;
-    //     uint256 expiresAt;
-    //     bytes32 acceptedProposalId;
-    //     address fulfilledByProvider;
-    // }
-
-    // struct SettlementProposal {
-    //     bytes32 proposalId;
-    //     bytes32 orderId;
-    //     address provider;
-    //     uint256 proposedAmount;
-    //     uint64 proposedFeeBps;
-    //     uint256 proposedAt;
-    //     uint256 proposalDeadline;
-    //     ProposalStatus status;
-    // }
-
-    // struct ProviderReputation {
-    //     address provider;
-    //     uint256 totalOrders;
-    //     uint256 successfulOrders;
-    //     uint256 failedOrders;
-    //     uint256 noShowCount;
-    //     uint256 totalSettlementTime;
-    //     uint256 lastUpdated;
-    //     bool isFraudulent;
-    //     bool isBlacklisted;
-    // }
-
-    /* ========== STATE VARIABLES ========== */
-
-    // Core state variables
-    // uint256 private constant MAX_BPS = 100_000;
+    IPayNodeAccessManager public accessManager;
+    IPGatewaySettings public settings;
 
     // Core Mappings
     mapping(bytes32 => PGatewayStructs.Order) public orders;
@@ -119,18 +30,16 @@ contract PGateway is
     mapping(address => PGatewayStructs.ProviderIntent) public providerIntents;
     mapping(address => PGatewayStructs.ProviderReputation) public providerReputation;
     mapping(address => uint256) public userNonce;
-    // mapping(address => bool) public supportedTokens;
     mapping(bytes32 => bool) public proposalExecuted;
-
-    // Arrays for iteration
-    address[] public registeredProviders;
-    bytes32[] public activeOrderIds;
-
-    
 
     /* ========== EVENTS ========== */
 
-    // Provider Intent Events
+    /// @notice Emitted when a provider registers intent to provide liquidity
+    /// @param provider Address of the provider
+    /// @param currency Currency code (e.g., "USDT", "NGN", "USD")
+    /// @param availableAmount Amount available for settlement
+    /// @param commitmentWindow Commitment period for accepting settlements
+    /// @param expiresAt Timestamp when the intent expires
     event IntentRegistered(
         address indexed provider,
         string indexed currency,
@@ -139,20 +48,48 @@ contract PGateway is
         uint256 expiresAt
     );
 
+    /// @notice Emitted when a provider updates their available capacity
+    /// @param provider Address of the provider
+    /// @param currency Currency code
+    /// @param newAmount Updated available amount
+    /// @param timestamp Time of update
     event IntentUpdated(address indexed provider, string indexed currency, uint256 newAmount, uint256 timestamp);
 
+    /// @notice Emitted when a provider intent expires automatically
+    /// @param provider Address of the provider
+    /// @param currency Currency code
     event IntentExpired(address indexed provider, string indexed currency);
 
+    /// @notice Emitted when a provider releases reserved capacity
+    /// @param provider Address of the provider
+    /// @param currency Currency code
+    /// @param releaseAmount Amount released
+    /// @param reason Reason for release
     event IntentReleased(address indexed provider, string indexed currency, uint256 releaseAmount, string reason);
 
-    // Order Events
+    /// @notice Emitted when a new user order is created
+    /// @param orderId Unique identifier of the order
+    /// @param user Address of the user who created the order
+    /// @param token ERC20 token address used for payment
+    /// @param amount Order amount
+    /// @param tier Tier classification of the order
+    /// @param expiresAt Expiration timestamp of the order
     event OrderCreated(
-        bytes32 indexed orderId, address indexed user, address token, uint256 amount, OrderTier tier, uint256 expiresAt
+        bytes32 indexed orderId,
+        address indexed user,
+        address token,
+        uint256 amount,
+        PGatewayStructs.OrderTier tier,
+        uint256 expiresAt
     );
 
-    event OrderQueued(bytes32 indexed orderId, address indexed user, uint256 requiredAmount, uint256 queuedAt);
-
-    // Proposal Events
+    /// @notice Emitted when a provider creates a settlement proposal
+    /// @param proposalId Unique identifier for the proposal
+    /// @param orderId Associated order ID
+    /// @param provider Address of the provider
+    /// @param amount Proposed settlement amount
+    /// @param feeBps Proposed fee in basis points
+    /// @param deadline Proposal expiration time
     event SettlementProposalCreated(
         bytes32 indexed proposalId,
         bytes32 indexed orderId,
@@ -162,57 +99,109 @@ contract PGateway is
         uint256 deadline
     );
 
+    /// @notice Emitted when a settlement proposal is accepted
+    /// @param proposalId Accepted proposal ID
+    /// @param orderId Associated order ID
+    /// @param provider Address of the provider
+    /// @param timestamp Acceptance timestamp
     event SettlementProposalAccepted(
         bytes32 indexed proposalId, bytes32 indexed orderId, address indexed provider, uint256 timestamp
     );
 
+    /// @notice Emitted when a proposal is rejected
+    /// @param proposalId Proposal ID
+    /// @param provider Address of the rejecting provider
+    /// @param reason Reason for rejection
     event SettlementProposalRejected(bytes32 indexed proposalId, address indexed provider, string reason);
 
+    /// @notice Emitted when a proposal times out
+    /// @param proposalId Proposal ID
+    /// @param provider Address of the provider
     event SettlementProposalTimeout(bytes32 indexed proposalId, address indexed provider);
 
-    // Settlement Events
+    /// @notice Emitted after a successful settlement execution
+    /// @param orderId Order ID
+    /// @param proposalId Proposal ID used for settlement
+    /// @param provider Address of the provider
+    /// @param amount Settled amount
+    /// @param feeBps Fee applied in basis points
+    /// @param protocolFee Protocol’s share of the fee
     event SettlementExecuted(
         bytes32 indexed orderId,
         bytes32 indexed proposalId,
         address indexed provider,
         uint256 amount,
         uint64 feeBps,
-        uint256 protocolFee
+        uint256 protocolFee,
+        uint46 integratorFee
     );
 
+    /// @notice Emitted when an order is refunded
+    /// @param orderId Order ID
+    /// @param user Address of the user
+    /// @param amount Refunded amount
+    /// @param reason Reason for refund
     event OrderRefunded(bytes32 indexed orderId, address indexed user, uint256 amount, string reason);
 
-    // Reputation Events
+    /// @notice Emitted when a provider’s reputation is updated
+    /// @param provider Address of the provider
+    /// @param successfulOrders Count of successful orders
+    /// @param failedOrders Count of failed orders
+    /// @param noShowCount Count of times provider didn’t respond
     event ProviderReputationUpdated(
         address indexed provider, uint256 successfulOrders, uint256 failedOrders, uint256 noShowCount
     );
 
+    /// @notice Emitted when a provider is blacklisted
+    /// @param provider Address of the provider
+    /// @param reason Reason for blacklisting
     event ProviderBlacklisted(address indexed provider, string reason);
 
+    /// @notice Emitted when a provider is flagged as fraudulent
+    /// @param provider Address of the provider
     event ProviderFraudFlagged(address indexed provider);
+
+    /* ========== ERRORS ========== */
+
+    error InvalidAmount();
+    error InvalidAddress();
+    error InvalidFee();
+    error InvalidOrder();
+    error InvalidProposal();
+    error InvalidIntent();
+    error IntentNotExpired();
+    error OrderExpired();
+    error Unauthorized();
+    // error ProviderBlacklisted();
+    error TokenNotSupported();
 
     /* ========== MODIFIERS ========== */
 
+    /// @notice Ensures the caller is the aggregator
     modifier onlyAggregator() {
-        require(msg.sender == settings.aggregatorAddress(), "OnlyAggregator");
+        require(accessManager.hasRole(accessManager.AGGREGATOR_ROLE(), msg.sender), "Unauthorized");
         _;
     }
 
+    /// @notice Ensures the caller is not blacklisted
     modifier whenNotBlacklisted() {
         require(!accessManager.isBlacklisted(msg.sender), "UserBlacklisted");
         _;
     }
 
+    /// @notice Ensures the caller is a registered provider
     modifier onlyProvider() {
         require(providerIntents[msg.sender].provider != address(0), "NotRegisteredProvider");
         _;
     }
 
+    /// @notice Ensures the token is supported
     modifier validToken(address _token) {
-        require(supportedTokens[_token], "TokenNotSupported");
+        require(settings.isTokenSupported(_token), "TokenNotSupported");
         _;
     }
 
+    /// @notice Ensures the order exists
     modifier validOrder(bytes32 _orderId) {
         require(orders[_orderId].user != address(0), "OrderNotFound");
         _;
@@ -220,108 +209,69 @@ contract PGateway is
 
     /* ========== INITIALIZATION ========== */
 
+    /// @notice Initializes the contract with access manager and settings
+    /// @param _accessManager Address of the PayNodeAccessManager contract
+    /// @param _settings Address of the PGatewaySettings contract
     function initialize(address _accessManager, address _settings) external initializer {
         require(_accessManager != address(0) && _settings != address(0), "InvalidAddress");
 
         __Pausable_init();
-        __ReentrancyGuard_init();
         __UUPSUpgradeable_init();
-        __Ownable_init();
 
-        accessManager = accessManager(_accessManager);
-        settings = PGatewaySettings(_settings);
+        accessManager = IPayNodeAccessManager(_accessManager);
+        settings = IPGatewaySettings(_settings);
     }
 
-    /* ========== OWNER FUNCTIONS ========== */
+    /* ========== ADMIN FUNCTIONS ========== */
 
-    modifier onlyAdmin() {
-        require(accessManager.hasRole(accessManager.DEFAULT_ADMIN_ROLE(), msg.sender), "Not admin");
-        _;
-    }
-
-    // modifier onlyAggregator() {
-    //     require(msg.sender == settings.aggregatorAddress(), "Not aggregator");
-    //     _;
-    // }
-
-    function pause() external onlyAdmin {
+    /// @notice Pauses the contract
+    /// @dev Requires DEFAULT_ADMIN_ROLE
+    function pause() external {
+        require(accessManager.executeNonReentrant(msg.sender, accessManager.DEFAULT_ADMIN_ROLE()), "Unauthorized");
         _pause();
     }
 
-    function unpause() external onlyAdmin {
+    /// @notice Unpauses the contract
+    /// @dev Requires DEFAULT_ADMIN_ROLE
+    function unpause() external {
+        require(accessManager.executeNonReentrant(msg.sender, accessManager.DEFAULT_ADMIN_ROLE()), "Unauthorized");
         _unpause();
     }
 
-    function _authorizeUpgrade(address newImplementation) internal override {
-        require(accessManager.hasRole(accessManager.ADMIN_ROLE(), msg.sender), "Not upgrader");
-    }
-
-    function setSupportedToken(address _token, bool _supported) external onlyAdmin {
-        require(_token != address(0), "InvalidToken");
-        supportedTokens[_token] = _supported;
-    }
-
-    function setTreasuryAddress(address _newTreasury) external onlyOwner {
-        require(_newTreasury != address(0), "InvalidAddress");
-        treasuryAddress = _newTreasury;
-    }
-
-    function setAggregatorAddress(address _newAggregator) external onlyOwner {
-        require(_newAggregator != address(0), "InvalidAddress");
-        aggregatorAddress = _newAggregator;
-    }
-
-    function setProtocolFee(uint64 _newFee) external onlyOwner {
-        require(_newFee <= 5000, "FeeTooHigh"); // Max 5%
-        protocolFeePercent = _newFee;
-    }
-
-    function setTierLimits(uint256 _smallLimit, uint256 _mediumLimit) external onlyOwner {
-        require(_smallLimit > 0 && _mediumLimit > _smallLimit, "InvalidLimits");
-        SMALL_TIER_LIMIT = _smallLimit;
-        MEDIUM_TIER_LIMIT = _mediumLimit;
-    }
-
-    function setOrderExpiryWindow(uint256 _newWindow) external onlyOwner {
-        require(_newWindow > 0, "InvalidWindow");
-        orderExpiryWindow = _newWindow;
-    }
-
-    function setProposalTimeout(uint256 _newTimeout) external onlyOwner {
-        require(_newTimeout > 0, "InvalidTimeout");
-        proposalTimeout = _newTimeout;
+    /// @notice Authorizes contract upgrades
+    /// @param newImplementation Address of the new implementation contract
+    /// @dev Requires ADMIN_ROLE
+    function _authorizeUpgrade(address newImplementation) internal view override {
+        require(accessManager.hasRole(accessManager.ADMIN_ROLE(), msg.sender), "Unauthorized");
     }
 
     /* ========== PROVIDER INTENT FUNCTIONS ========== */
 
-    /**
-     * @notice Register provider intent with available capacity
-     * @param _currency Currency code (e.g., "NGN", "USD")
-     * @param _availableAmount Amount provider can handle
-     * @param _minFeeBps Minimum fee in basis points
-     * @param _maxFeeBps Maximum fee in basis points
-     * @param _commitmentWindow Time window for provider to accept proposal
-     */
+    /// @notice Registers provider intent with available capacity
+    /// @param _currency Currency code (e.g., "USDT", "NGN", "USD")
+    /// @param _availableAmount Amount provider can handle
+    /// @param _minFeeBps Minimum fee in basis points
+    /// @param _maxFeeBps Maximum fee in basis points
+    /// @param _commitmentWindow Time window for provider to accept proposal
     function registerIntent(
         string calldata _currency,
         uint256 _availableAmount,
         uint64 _minFeeBps,
         uint64 _maxFeeBps,
         uint256 _commitmentWindow
-    ) external whenNotPaused nonReentrant {
+    ) external whenNotPaused whenNotBlacklisted {
+        require(accessManager.executeProviderNonReentrant(msg.sender), "InvalidProvider");
         require(_availableAmount > 0, "InvalidAmount");
-        require(_minFeeBps <= _maxFeeBps, "InvalidFees");
-        require(_maxFeeBps <= 10000, "FeesTooHigh"); // Max 10%
-        require(_commitmentWindow > 0, "InvalidCommitmentWindow");
+        require(_minFeeBps <= _maxFeeBps, "InvalidFee");
+        require(_maxFeeBps <= settings.maxProtocolFee(), "InvalidFee");
+        require(_commitmentWindow > 0, "InvalidDuration");
 
         address provider = msg.sender;
-
-        // Check if provider is blacklisted
         require(!providerReputation[provider].isBlacklisted, "ProviderBlacklisted");
 
-        uint256 expiresAt = block.timestamp + 5 minutes;
+        uint256 expiresAt = block.timestamp + settings.intentExpiry();
 
-        providerIntents[provider] = ProviderIntent({
+        providerIntents[provider] = PGatewayStructs.ProviderIntent({
             provider: provider,
             currency: _currency,
             availableAmount: _availableAmount,
@@ -333,128 +283,120 @@ contract PGateway is
             isActive: true
         });
 
-        // Track provider if first time
         if (providerReputation[provider].provider == address(0)) {
-            registeredProviders.push(provider);
             providerReputation[provider].provider = provider;
         }
 
         emit IntentRegistered(provider, _currency, _availableAmount, _commitmentWindow, expiresAt);
     }
 
-    /**
-     * @notice Update existing provider intent
-     */
+    /// @notice Updates existing provider intent
+    /// @param _currency Currency code
+    /// @param _newAmount New available amount
     function updateIntent(string calldata _currency, uint256 _newAmount) external onlyProvider whenNotPaused {
-        address provider = msg.sender;
-        ProviderIntent storage intent = providerIntents[provider];
-
-        require(intent.isActive, "NoActiveIntent");
+        require(accessManager.executeProviderNonReentrant(msg.sender), "InvalidProvider");
         require(_newAmount > 0, "InvalidAmount");
+
+        PGatewayStructs.ProviderIntent storage intent = providerIntents[msg.sender];
+        require(intent.isActive, "InvalidIntent");
 
         intent.availableAmount = _newAmount;
         intent.registeredAt = block.timestamp;
-        intent.expiresAt = block.timestamp + 5 minutes;
+        intent.expiresAt = block.timestamp + settings.intentExpiry();
 
-        emit IntentUpdated(provider, _currency, _newAmount, block.timestamp);
+        emit IntentUpdated(msg.sender, _currency, _newAmount, block.timestamp);
     }
 
-    /**
-     * @notice Expire provider intent
-     */
+    /// @notice Expires provider intent
+    /// @param _provider Provider address
     function expireIntent(address _provider) external onlyAggregator {
-        ProviderIntent storage intent = providerIntents[_provider];
-        require(intent.isActive, "IntentNotActive");
+        require(accessManager.executeAggregatorNonReentrant(msg.sender), "Unauthorized");
+        PGatewayStructs.ProviderIntent storage intent = providerIntents[_provider];
+        require(intent.isActive, "InvalidIntent");
         require(block.timestamp > intent.expiresAt, "IntentNotExpired");
 
         intent.isActive = false;
-
         emit IntentExpired(_provider, intent.currency);
     }
 
-    /**
-     * @notice Reserve capacity when proposal is sent
-     */
+    /// @notice Reserves capacity when a proposal is sent
+    /// @param _provider Provider address
+    /// @param _amount Amount to reserve
     function reserveIntent(address _provider, uint256 _amount) external onlyAggregator {
-        ProviderIntent storage intent = providerIntents[_provider];
-        require(intent.isActive, "IntentNotActive");
-        require(intent.availableAmount >= _amount, "InsufficientCapacity");
+        require(accessManager.executeAggregatorNonReentrant(msg.sender), "Unauthorized");
+        PGatewayStructs.ProviderIntent storage intent = providerIntents[_provider];
+        require(intent.isActive, "InvalidIntent");
+        require(intent.availableAmount >= _amount, "InvalidAmount");
 
         intent.availableAmount -= _amount;
     }
 
-    /**
-     * @notice Release reserved capacity if proposal rejected or timeout
-     */
+    /// @notice Releases reserved capacity if proposal is rejected or times out
+    /// @param _provider Provider address
+    /// @param _amount Amount to release
+    /// @param _reason Reason for release
     function releaseIntent(address _provider, uint256 _amount, string calldata _reason) external onlyAggregator {
-        ProviderIntent storage intent = providerIntents[_provider];
+        require(accessManager.executeAggregatorNonReentrant(msg.sender), "Unauthorized");
+        PGatewayStructs.ProviderIntent storage intent = providerIntents[_provider];
         intent.availableAmount += _amount;
-
         emit IntentReleased(_provider, intent.currency, _amount, _reason);
     }
 
-    /**
-     * @notice Get active provider intent
-     */
-    function getProviderIntent(address _provider) external view returns (ProviderIntent memory) {
+    /// @notice Gets active provider intent
+    /// @param _provider Provider address
+    /// @return ProviderIntent struct containing intent details
+    function getProviderIntent(address _provider) external view returns (PGatewayStructs.ProviderIntent memory) {
         return providerIntents[_provider];
     }
 
     /* ========== ORDER CREATION FUNCTIONS ========== */
 
-    /**
-     * @notice Create a new order
-     * @param _token ERC20 token address
-     * @param _amount Order amount
-     * @param _refundAddress Address to refund if order fails
-     */
-    function createOrder(address _token, uint256 _amount, address _refundAddress, string messageHash)
+    /// @notice Creates a new payment order
+    /// @param _token ERC20 token address
+    /// @param _amount Order amount
+    /// @param _refundAddress Address for refunds
+    /// @return orderId Generated unique order ID
+    function createOrder(address _token, uint256 _amount, address _refundAddress, string calldata _messageHash)
         external
         whenNotPaused
-        nonReentrant
-        validToken(_token)
         whenNotBlacklisted
+        validToken(_token)
         returns (bytes32 orderId)
     {
         require(_amount > 0, "InvalidAmount");
-        require(_refundAddress != address(0), "InvalidRefundAddress");
+        require(_refundAddress != address(0), "InvalidAddress");
+        require(accessManager.executeNonReentrant(msg.sender, bytes32(0)), "Unauthorized");
 
-        // Determine tier
-        OrderTier tier = _determineTier(_amount);
+        PGatewayStructs.OrderTier tier = _determineTier(_amount);
 
-        // Transfer tokens from user to contract
-        IERC20(_token).transferFrom(msg.sender, address(this), _amount);
+        IERC20(_token).safeTransferFrom(msg.sender, address(this), _amount);
 
-        // Generate order ID
         userNonce[msg.sender]++;
         orderId = keccak256(abi.encode(msg.sender, userNonce[msg.sender], block.chainid));
 
-        // Create order
-        orders[orderId] = Order({
+        orders[orderId] = PGatewayStructs.Order({
             orderId: orderId,
             user: msg.sender,
             token: _token,
             amount: _amount,
             tier: tier,
-            status: OrderStatus.PENDING,
+            status: PGatewayStructs.OrderStatus.PENDING,
             refundAddress: _refundAddress,
             createdAt: block.timestamp,
-            expiresAt: block.timestamp + orderExpiryWindow,
+            expiresAt: block.timestamp + settings.orderExpiryWindow(),
             acceptedProposalId: bytes32(0),
-            fulfilledByProvider: address(0)
+            fulfilledByProvider: address(0),
+            integrator: settings.aggregatorAddress(),
+            integratorFee: settings.integratorFeePercent() 
         });
 
-        activeOrderIds.push(orderId);
-
         emit OrderCreated(orderId, msg.sender, _token, _amount, tier, orders[orderId].expiresAt);
-
         return orderId;
     }
 
-    /**
-     * @notice Determine order tier based on amount
-     */
- 
+    /// @notice Determines order tier based on amount
+    /// @param _amount Order amount
+    /// @return OrderTier enum value
     function _determineTier(uint256 _amount) internal view returns (PGatewayStructs.OrderTier) {
         if (_amount < settings.ALPHA_TIER_LIMIT()) return PGatewayStructs.OrderTier.ALPHA;
         if (_amount < settings.BETA_TIER_LIMIT()) return PGatewayStructs.OrderTier.BETA;
@@ -463,44 +405,40 @@ contract PGateway is
         return PGatewayStructs.OrderTier.TITAN;
     }
 
-    /**
-     * @notice Get order details
-     */
-    function getOrder(bytes32 _orderId) external view validOrder(_orderId) returns (Order memory) {
+    /// @notice Gets order details
+    /// @param _orderId Order ID
+    /// @return Order struct containing order data
+    function getOrder(bytes32 _orderId) external view validOrder(_orderId) returns (PGatewayStructs.Order memory) {
         return orders[_orderId];
     }
 
     /* ========== SETTLEMENT PROPOSAL FUNCTIONS ========== */
 
-    /**
-     * @notice Create settlement proposal (called by aggregator)
-     * @param _orderId Order ID to settle
-     * @param _provider Provider address
-     * @param _proposedFeeBps Fee in basis points
-     */
+    /// @notice Creates a settlement proposal for an order
+    /// @param _orderId Associated order ID
+    /// @param _provider Provider address
+    /// @param _proposedFeeBps Proposed fee in basis points
+    /// @return proposalId Generated proposal ID
     function createProposal(bytes32 _orderId, address _provider, uint64 _proposedFeeBps)
         external
         onlyAggregator
         validOrder(_orderId)
         returns (bytes32 proposalId)
     {
-        Order storage order = orders[_orderId];
-        require(order.status == OrderStatus.PENDING, "OrderNotPending");
+        require(accessManager.executeAggregatorNonReentrant(msg.sender), "Unauthorized");
+        PGatewayStructs.Order storage order = orders[_orderId];
+        require(order.status == PGatewayStructs.OrderStatus.PENDING, "InvalidOrder");
         require(block.timestamp < order.expiresAt, "OrderExpired");
 
-        ProviderIntent memory intent = providerIntents[_provider];
-        require(intent.isActive, "ProviderIntentNotActive");
-        require(intent.availableAmount >= order.amount, "InsufficientCapacity");
-
-        // Validate fee
+        PGatewayStructs.ProviderIntent memory intent = providerIntents[_provider];
+        require(intent.isActive, "InvalidIntent");
+        require(intent.availableAmount >= order.amount, "InvalidAmount");
         require(_proposedFeeBps >= intent.minFeeBps && _proposedFeeBps <= intent.maxFeeBps, "InvalidFee");
 
-        // Generate proposal ID
         proposalId = keccak256(abi.encode(_orderId, _provider, block.timestamp, block.number));
+        uint256 deadline = block.timestamp + settings.proposalTimeout();
 
-        uint256 deadline = block.timestamp + intent.commitmentWindow;
-
-        proposals[proposalId] = SettlementProposal({
+        proposals[proposalId] = PGatewayStructs.SettlementProposal({
             proposalId: proposalId,
             orderId: _orderId,
             provider: _provider,
@@ -508,151 +446,139 @@ contract PGateway is
             proposedFeeBps: _proposedFeeBps,
             proposedAt: block.timestamp,
             proposalDeadline: deadline,
-            status: ProposalStatus.PENDING
+            status: PGatewayStructs.ProposalStatus.PENDING
         });
 
-        // Update order status
-        order.status = OrderStatus.PROPOSED;
-
+        order.status = PGatewayStructs.OrderStatus.PROPOSED;
         emit SettlementProposalCreated(proposalId, _orderId, _provider, order.amount, _proposedFeeBps, deadline);
-
         return proposalId;
     }
 
-    /**
-     * @notice Provider accepts settlement proposal
-     */
-    function acceptProposal(bytes32 _proposalId) external onlyProvider whenNotPaused nonReentrant {
-        SettlementProposal storage proposal = proposals[_proposalId];
-        require(proposal.provider == msg.sender, "NotProposalProvider");
-        require(proposal.status == ProposalStatus.PENDING, "ProposalNotPending");
-        require(block.timestamp < proposal.proposalDeadline, "ProposalExpired");
+    /// @notice Provider accepts a settlement proposal
+    /// @param _proposalId Proposal ID to accept
+    function acceptProposal(bytes32 _proposalId) external onlyProvider whenNotPaused {
+        require(accessManager.executeProviderNonReentrant(msg.sender), "InvalidProvider");
+        PGatewayStructs.SettlementProposal storage proposal = proposals[_proposalId];
+        require(proposal.provider == msg.sender, "Unauthorized");
+        require(proposal.status == PGatewayStructs.ProposalStatus.PENDING, "InvalidProposal");
+        require(block.timestamp < proposal.proposalDeadline, "InvalidProposal");
 
-        proposal.status = ProposalStatus.ACCEPTED;
-
-        Order storage order = orders[proposal.orderId];
-        order.status = OrderStatus.ACCEPTED;
+        proposal.status = PGatewayStructs.ProposalStatus.ACCEPTED;
+        PGatewayStructs.Order storage order = orders[proposal.orderId];
+        order.status = PGatewayStructs.OrderStatus.ACCEPTED;
         order.acceptedProposalId = _proposalId;
         order.fulfilledByProvider = msg.sender;
 
         emit SettlementProposalAccepted(_proposalId, proposal.orderId, msg.sender, block.timestamp);
     }
 
-    /**
-     * @notice Provider rejects settlement proposal
-     */
-    function rejectProposal(bytes32 _proposalId, string calldata _reason) external onlyProvider nonReentrant {
-        SettlementProposal storage proposal = proposals[_proposalId];
-        require(proposal.provider == msg.sender, "NotProposalProvider");
-        require(proposal.status == ProposalStatus.PENDING, "ProposalNotPending");
+    /// @notice Provider rejects a settlement proposal
+    /// @param _proposalId Proposal ID to reject
+    /// @param _reason Reason for rejection
+    function rejectProposal(bytes32 _proposalId, string calldata _reason) external onlyProvider {
+        require(accessManager.executeProviderNonReentrant(msg.sender), "InvalidProvider");
+        PGatewayStructs.SettlementProposal storage proposal = proposals[_proposalId];
+        require(proposal.provider == msg.sender, "Unauthorized");
+        require(proposal.status == PGatewayStructs.ProposalStatus.PENDING, "InvalidProposal");
 
-        proposal.status = ProposalStatus.REJECTED;
-
-        // Update provider reputation
+        proposal.status = PGatewayStructs.ProposalStatus.REJECTED;
         providerReputation[msg.sender].noShowCount++;
-
         emit SettlementProposalRejected(_proposalId, msg.sender, _reason);
     }
 
-    /**
-     * @notice Mark proposal as timeout (called by aggregator)
-     */
+    /// @notice Marks a proposal as timed out
+    /// @param _proposalId Proposal ID
     function timeoutProposal(bytes32 _proposalId) external onlyAggregator {
-        SettlementProposal storage proposal = proposals[_proposalId];
-        require(proposal.status == ProposalStatus.PENDING, "ProposalNotPending");
-        require(block.timestamp > proposal.proposalDeadline, "ProposalNotExpired");
+        require(accessManager.executeAggregatorNonReentrant(msg.sender), "Unauthorized");
+        PGatewayStructs.SettlementProposal storage proposal = proposals[_proposalId];
+        require(proposal.status == PGatewayStructs.ProposalStatus.PENDING, "InvalidProposal");
+        require(block.timestamp > proposal.proposalDeadline, "InvalidProposal");
 
-        proposal.status = ProposalStatus.TIMEOUT;
-
+        proposal.status = PGatewayStructs.ProposalStatus.TIMEOUT;
         emit SettlementProposalTimeout(_proposalId, proposal.provider);
     }
 
-    /**
-     * @notice Get proposal details
-     */
-    function getProposal(bytes32 _proposalId) external view returns (SettlementProposal memory) {
+    /// @notice Gets settlement proposal details
+    /// @param _proposalId Proposal ID
+    /// @return SettlementProposal struct with proposal details
+    function getProposal(bytes32 _proposalId) external view returns (PGatewayStructs.SettlementProposal memory) {
         return proposals[_proposalId];
     }
 
     /* ========== SETTLEMENT EXECUTION FUNCTIONS ========== */
 
-    /**
-     * @notice Execute settlement after provider accepts
-     * @param _proposalId Accepted proposal ID
-     */
-    function executeSettlement(bytes32 _proposalId) external onlyAggregator nonReentrant {
-        SettlementProposal storage proposal = proposals[_proposalId];
-        require(proposal.status == ProposalStatus.ACCEPTED, "ProposalNotAccepted");
-        require(!proposalExecuted[_proposalId], "AlreadyExecuted");
+    /// @notice Executes settlement after proposal acceptance
+    /// @param _proposalId Accepted proposal ID
+    function executeSettlement(bytes32 _proposalId) external onlyAggregator {
+        require(accessManager.executeAggregatorNonReentrant(msg.sender), "Unauthorized");
+        PGatewayStructs.SettlementProposal storage proposal = proposals[_proposalId];
+        require(proposal.status == PGatewayStructs.ProposalStatus.ACCEPTED, "InvalidProposal");
+        require(!proposalExecuted[_proposalId], "InvalidProposal");
 
-        Order storage order = orders[proposal.orderId];
-        require(order.status == OrderStatus.ACCEPTED, "OrderNotAccepted");
+        PGatewayStructs.Order storage order = orders[proposal.orderId];
+        require(order.status == PGatewayStructs.OrderStatus.ACCEPTED, "InvalidOrder");
 
-        // Calculate fees
-        uint256 protocolFee = (proposal.proposedAmount * settings.protocolFeePercent()) / MAX_BPS;
-        uint256 providerFee = (proposal.proposedAmount * proposal.proposedFeeBps) / MAX_BPS;
-        uint256 providerAmount = proposal.proposedAmount - protocolFee - providerFee;
+        uint256 integratorFee = (proposal.proposedAmount * settings.integratorFeePercent()) / settings.MAX_BPS();
+        uint256 protocolFee = (proposal.proposedAmount * settings.protocolFeePercent()) / settings.MAX_BPS();
+        uint256 providerFee = (proposal.proposedAmount * proposal.proposedFeeBps) / settings.MAX_BPS();
+        uint256 providerAmount = proposal.proposedAmount - protocolFee;
 
-        // Transfer protocol fee to treasury
-        IERC20(order.token).transfer(settings.treasuryAddress(), protocolFee);
+        IERC20(order.token).safeTransfer(settings.treasuryAddress(), protocolFee);
+        IERC20(order.token).safeTransfer(order.integrator, integratorFee);
+        IERC20(order.token).safeTransfer(proposal.provider, providerAmount);
 
-        // Transfer amount to provider
-        IERC20(order.token).transfer(proposal.provider, providerAmount);
-
-        // Mark as executed
         proposalExecuted[_proposalId] = true;
-        order.status = OrderStatus.FULFILLED;
+        order.status = PGatewayStructs.OrderStatus.FULFILLED;
 
-        // Update provider reputation
         _updateProviderSuccess(proposal.provider, block.timestamp - proposal.proposedAt);
 
         emit SettlementExecuted(
-            proposal.orderId, _proposalId, proposal.provider, providerAmount, proposal.proposedFeeBps, protocolFee
+            proposal.orderId, _proposalId, proposal.provider, providerAmount, proposal.proposedFeeBps, protocolFee, integratorFee
         );
     }
 
     /* ========== REFUND FUNCTIONS ========== */
 
-    /**
-     * @notice Refund order if no provider accepts within timeout
-     */
-    function refundOrder(bytes32 _orderId) external onlyAggregator nonReentrant validOrder(_orderId) {
-        Order storage order = orders[_orderId];
-        require(order.status != OrderStatus.FULFILLED, "OrderFulfilled");
-        require(order.status != OrderStatus.REFUNDED, "AlreadyRefunded");
+    /// @notice Refunds an order if no provider accepts within timeout
+    /// @param _orderId Order ID to refund
+    function refundOrder(bytes32 _orderId) external onlyAggregator validOrder(_orderId) {
+        require(accessManager.executeAggregatorNonReentrant(msg.sender), "Unauthorized");
+        PGatewayStructs.Order storage order = orders[_orderId];
+        require(order.status != PGatewayStructs.OrderStatus.FULFILLED, "InvalidOrder");
+        require(order.status != PGatewayStructs.OrderStatus.REFUNDED, "InvalidOrder");
         require(block.timestamp > order.expiresAt, "OrderNotExpired");
 
-        order.status = OrderStatus.REFUNDED;
-
-        // Refund full amount to refund address
-        IERC20(order.token).transfer(order.refundAddress, order.amount);
+        order.status = PGatewayStructs.OrderStatus.REFUNDED;
+        IERC20(order.token).safeTransfer(order.refundAddress, order.amount);
 
         emit OrderRefunded(_orderId, order.user, order.amount, "OrderTimeout");
     }
 
-    /**
-     * @notice Manual refund by user (if aggregator allows)
-     */
-    function requestRefund(bytes32 _orderId) external nonReentrant validOrder(_orderId) {
-        Order storage order = orders[_orderId];
-        require(order.user == msg.sender, "NotOrderCreator");
-        require(order.status == OrderStatus.PENDING || order.status == OrderStatus.PROPOSED, "CannotRefund");
+    /// @notice Allows user to request a refund
+    /// @param _orderId Order ID to refund
+    function requestRefund(bytes32 _orderId) external validOrder(_orderId) {
+        require(accessManager.executeNonReentrant(msg.sender, bytes32(0)), "Unauthorized");
+        PGatewayStructs.Order storage order = orders[_orderId];
+        require(order.user == msg.sender, "Unauthorized");
+        require(
+            order.status == PGatewayStructs.OrderStatus.PENDING || order.status == PGatewayStructs.OrderStatus.PROPOSED,
+            "InvalidOrder"
+        );
         require(block.timestamp > order.expiresAt, "OrderNotExpired");
 
-        order.status = OrderStatus.CANCELLED;
-
-        IERC20(order.token).transfer(order.refundAddress, order.amount);
+        order.status = PGatewayStructs.OrderStatus.CANCELLED;
+        IERC20(order.token).safeTransfer(order.refundAddress, order.amount);
 
         emit OrderRefunded(_orderId, msg.sender, order.amount, "UserRequested");
     }
 
     /* ========== REPUTATION FUNCTIONS ========== */
 
-    /**
-     * @notice Update provider success metrics
-     */
+    /// @notice Updates provider success metrics
+    /// @param _provider Provider address
+    /// @param _settlementTime Time taken to settle
     function _updateProviderSuccess(address _provider, uint256 _settlementTime) internal {
-        ProviderReputation storage rep = providerReputation[_provider];
+        PGatewayStructs.ProviderReputation storage rep = providerReputation[_provider];
         rep.totalOrders++;
         rep.successfulOrders++;
         rep.totalSettlementTime += _settlementTime;
@@ -661,67 +587,48 @@ contract PGateway is
         emit ProviderReputationUpdated(_provider, rep.successfulOrders, rep.failedOrders, rep.noShowCount);
     }
 
-    /**
-     * @notice Flag provider as fraudulent
-     */
+    /// @notice Flags a provider as fraudulent
+    /// @param _provider Provider address
     function flagFraudulent(address _provider) external onlyAggregator {
-        require(providerReputation[_provider].provider != address(0), "ProviderNotFound");
+        require(accessManager.executeAggregatorNonReentrant(msg.sender), "Unauthorized");
+        require(providerReputation[_provider].provider != address(0), "InvalidAddress");
         providerReputation[_provider].isFraudulent = true;
         providerIntents[_provider].isActive = false;
 
         emit ProviderFraudFlagged(_provider);
     }
 
-    /**
-     * @notice Blacklist provider
-     */
-    function blacklistProvider(address _provider, string calldata _reason) external onlyOwner {
+    /// @notice Blacklists a provider
+    /// @param _provider Provider address
+    /// @param _reason Reason for blacklisting
+    function blacklistProvider(address _provider, string calldata _reason) external {
+        require(accessManager.executeNonReentrant(msg.sender, accessManager.DEFAULT_ADMIN_ROLE()), "Unauthorized");
         providerReputation[_provider].isBlacklisted = true;
         providerIntents[_provider].isActive = false;
 
         emit ProviderBlacklisted(_provider, _reason);
     }
 
-    /**
-     * @notice Get provider reputation
-     */
-    function getProviderReputation(address _provider) external view returns (ProviderReputation memory) {
+    /// @notice Gets provider reputation data
+    /// @param _provider Provider address
+    /// @return ProviderReputation struct with reputation metrics
+    function getProviderReputation(address _provider)
+        external
+        view
+        returns (PGatewayStructs.ProviderReputation memory)
+    {
         return providerReputation[_provider];
     }
 
     /* ========== UTILITY FUNCTIONS ========== */
 
-    /**
-     * @notice Get all registered providers
-     */
-    function getRegisteredProviders() external view returns (address[] memory) {
-        return registeredProviders;
-    }
-
-    /**
-     * @notice Get all active orders
-     */
-    function getActiveOrders() external view returns (bytes32[] memory) {
-        return activeOrderIds;
-    }
-
-    /**
-     * @notice Get user nonce for replay protection
-     */
+    /// @notice Gets user nonce for replay protection
+    /// @param _user User address
+    /// @return nonce Current nonce
     function getUserNonce(address _user) external view returns (uint256) {
         return userNonce[_user];
     }
 
-    /**
-     * @notice Emergency withdrawal (only owner)
-     */
-    function emergencyWithdraw(address _token) external onlyOwner nonReentrant {
-        uint256 balance = IERC20(_token).balanceOf(address(this));
-        require(balance > 0, "NoBalance");
-        IERC20(_token).transfer(treasuryAddress, balance);
-    }
-
     // Reserve for upgrades
-  uint256[50] private __gap;
+    uint256[50] private __gap;
 }
-

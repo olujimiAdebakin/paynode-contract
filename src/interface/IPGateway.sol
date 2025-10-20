@@ -81,7 +81,9 @@ interface IPGateway {
      * @param requiredAmount Amount required to process the order
      * @param queuedAt Timestamp when order was queued
      */
-    event OrderQueued(bytes32 indexed orderId, address indexed user, uint256 requiredAmount, uint256 queuedAt, string messageHash);
+    event OrderQueued(
+        bytes32 indexed orderId, address indexed user, uint256 requiredAmount, uint256 queuedAt, string messageHash
+    );
 
     /**
      * @notice Emitted when a provider creates a settlement proposal
@@ -109,10 +111,7 @@ interface IPGateway {
      * @param timestamp Acceptance timestamp
      */
     event SettlementProposalAccepted(
-        bytes32 indexed proposalId,
-        bytes32 indexed orderId,
-        address indexed provider,
-        uint256 timestamp
+        bytes32 indexed proposalId, bytes32 indexed orderId, address indexed provider, uint256 timestamp
     );
 
     /**
@@ -165,10 +164,7 @@ interface IPGateway {
      * @param noShowCount Count of times provider didn’t respond
      */
     event ProviderReputationUpdated(
-        address indexed provider,
-        uint256 successfulOrders,
-        uint256 failedOrders,
-        uint256 noShowCount
+        address indexed provider, uint256 successfulOrders, uint256 failedOrders, uint256 noShowCount
     );
 
     /**
@@ -183,6 +179,21 @@ interface IPGateway {
      * @param provider Address of the provider
      */
     event ProviderFraudFlagged(address indexed provider);
+
+    // ============================
+    // Errors
+    // ============================
+    error InvalidAmount();
+    error InvalidAddress();
+    error InvalidFee();
+    error InvalidOrder();
+    error InvalidProposal();
+    error InvalidIntent();
+    error IntentNotExpired();
+    error OrderExpired();
+    error Unauthorized();
+    // error ProviderBlacklisted();
+    error TokenNotSupported();
 
     ///////////////////////////////////////////
     ////////     ADMIN FUNCTIONS      /////////
@@ -373,7 +384,10 @@ interface IPGateway {
     /// @notice Get provider reputation data
     /// @param _provider Address of the provider
     /// @return ProviderReputation Struct with reputation metrics
-    function getProviderReputation(address _provider) external view returns (PGatewayStructs.ProviderReputation memory);
+    function getProviderReputation(address _provider)
+        external
+        view
+        returns (PGatewayStructs.ProviderReputation memory);
 
     ///////////////////////////////////////////
     ////////     UTILITY FUNCTIONS     ////////

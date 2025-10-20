@@ -3,6 +3,7 @@ pragma solidity ^0.8.18;
 
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import "./PGatewayStructs.sol";
 
 /**
  * @title PayNodeGatewaySettings
@@ -17,8 +18,10 @@ contract PGatewaySettings is Initializable, OwnableUpgradeable {
     uint256 public orderExpiryWindow;
     uint256 public proposalTimeout;
     address public treasuryAddress;
-     uint256 public intentExpiry;
+    uint256 public intentExpiry;
     address public aggregatorAddress;
+    uint256 public integratorFeePercent;
+    address public integratorAddress;
 
     // Tier Limits
     uint256 public ALPHA_TIER_LIMIT; // < 3,000
@@ -31,7 +34,15 @@ contract PGatewaySettings is Initializable, OwnableUpgradeable {
     mapping(address => bool) public supportedTokens;
 
     // Events
-     event Initialized(address owner, address treasury, address aggregator, uint64 fee, uint256 expiry, uint256 timeout, uint256 intentExpiry);
+    event Initialized(
+        address owner,
+        address treasury,
+        address aggregator,
+        uint64 fee,
+        uint256 expiry,
+        uint256 timeout,
+        uint256 intentExpiry
+    );
     event ProtocolFeeUpdated(uint64 newFee);
     event TierLimitsUpdated(
         uint256 alphaLimit, uint256 betaLimit, uint256 deltaLimit, uint256 omegaLimit, uint256 titanLimit
@@ -53,43 +64,47 @@ contract PGatewaySettings is Initializable, OwnableUpgradeable {
         _disableInitializers();
     }
 
-    function initialize(
-        address initialOwner,
-        address _treasury,
-        address _aggregator,
-        uint64 _protocolFee,
-        uint256 _alphaLimit,
-        uint256 _betaLimit,
-        uint256 _deltaLimit,
-        uint256 _omegaLimit,
-        uint256 _titanLimit,
-        uint256 _orderExpiryWindow,
-        uint256 _proposalTimeout,
-        uint256 _intentExpiry
+    function initialize(PGatewayStructs.InitiateGatewaySettingsParams memory params
     ) external initializer {
-        __Ownable_init(initialOwner);
+         __Ownable_init(params.initialOwner);
 
-        if (_treasury == address(0) || _aggregator == address(0)) revert InvalidAddress();
-        if (_protocolFee > 5000) revert InvalidFee(); // Max 5%
+        if (params.treasury == address(0) || params.aggregator == address(0) || params.integrator == address(0)) revert InvalidAddress();
+        if (params.protocolFee > 5000) revert InvalidFee(); // Max 5%
         if (
-            _alphaLimit == 0 || _betaLimit <= _alphaLimit || _deltaLimit <= _betaLimit || _omegaLimit <= _deltaLimit
-                || _titanLimit <= _omegaLimit
+            params.alphaLimit == 0 || params.betaLimit <= params.alphaLimit || params.deltaLimit <= params.betaLimit || params.omegaLimit <= params.deltaLimit
+                || params.titanLimit <= params.omegaLimit
         ) revert InvalidLimits();
-        if (_orderExpiryWindow == 0 || _proposalTimeout == 0 || _proposalTimeout > _orderExpiryWindow || _intentExpiry == 0) revert InvalidDuration();
+        if (
+            params.orderExpiryWindow == 0 || params.proposalTimeout == 0 || params.proposalTimeout > params.orderExpiryWindow
+                || params.intentExpiry == 0
+        ) revert InvalidDuration();
 
-        treasuryAddress = _treasury;
-        aggregatorAddress = _aggregator;
-        protocolFeePercent = _protocolFee;
-        ALPHA_TIER_LIMIT = _alphaLimit;
-        BETA_TIER_LIMIT = _betaLimit;
-        DELTA_TIER_LIMIT = _deltaLimit;
-        OMEGA_TIER_LIMIT = _omegaLimit;
-        TITAN_TIER_LIMIT = _titanLimit;
-        orderExpiryWindow = _orderExpiryWindow;
-        proposalTimeout = _proposalTimeout;
-        intentExpiry = _intentExpiry;
+           // Validate fees
+    if (params.protocolFee > 5000 || params.integratorFee > 10_000)
+        revert InvalidFee(); // Protocol max 5%, Integrator max 100%
 
-        emit Initialized(initialOwner, _treasury, _aggregator, _protocolFee, _orderExpiryWindow, _proposalTimeout, _intentExpiry);
+        treasuryAddress = params.treasury;
+        aggregatorAddress = params.aggregator;
+        protocolFeePercent = params.protocolFee;
+        integratorAddress = params.integrator;
+        ALPHA_TIER_LIMIT = params.alphaLimit;
+        BETA_TIER_LIMIT = params.betaLimit;
+        DELTA_TIER_LIMIT = params.deltaLimit;
+        OMEGA_TIER_LIMIT = params.omegaLimit;
+        TITAN_TIER_LIMIT = params.titanLimit;
+        orderExpiryWindow = params.orderExpiryWindow;
+        proposalTimeout = params.proposalTimeout;
+        intentExpiry = params.intentExpiry;
+
+    emit Initialized(
+        params.initialOwner,
+        params.treasury,
+        params.aggregator,
+        params.protocolFee,
+        params.orderExpiryWindow,
+        params.proposalTimeout,
+        params.intentExpiry
+    );
     }
 
     /// @notice Updates the protocol fee percentage

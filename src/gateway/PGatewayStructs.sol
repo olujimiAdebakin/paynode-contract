@@ -16,11 +16,12 @@ library PGatewayStructs {
      * @dev Used to determine fee tiers, routing logic, and provider eligibility.
      */
     enum OrderTier {
-        ALPHA,  // < 3,000
-        BETA,   // 3,000 - 5,000
-        DELTA,  // 5,000 - 7,000
-        OMEGA,  // 7,000 - 10,000
-        TITAN   // > 10,000
+        ALPHA, // < 3,000
+        BETA, // 3,000 - 5,000
+        DELTA, // 5,000 - 7,000
+        OMEGA, // 7,000 - 10,000
+        TITAN // > 10,000
+
     }
 
     /**
@@ -49,6 +50,23 @@ library PGatewayStructs {
     }
 
     /* ========== STRUCTS ========== */
+
+    struct InitiateGatewaySettingsParams {
+    address initialOwner;
+    address treasury;
+    address aggregator;
+    uint64 protocolFee;
+    uint256 alphaLimit;
+    uint256 betaLimit;
+    uint256 deltaLimit;
+    address integrator;
+    uint64 integratorFee;
+    uint256 omegaLimit;
+    uint256 titanLimit;
+    uint256 orderExpiryWindow;
+    uint256 proposalTimeout;
+    uint256 intentExpiry;
+}
 
     /**
      * @title ProviderIntent
@@ -104,8 +122,8 @@ library PGatewayStructs {
         uint256 expiresAt;
         bytes32 acceptedProposalId;
         address fulfilledByProvider;
-        address integrator;       // dApp or partner that integrated PayNode
-        uint256 integratorFee;   // Fee charged by the integrator in basis points
+        address integrator; // dApp or partner that integrated PayNode
+        uint256 integratorFee; // Fee charged by the integrator in basis points
     }
 
     /**
