@@ -48,6 +48,8 @@ contract PayNodeAdmin is TimelockController, AutomationCompatibleInterface, Reen
     /// @param operationId The operation ID of the role change.
     error RoleChangeNotReady(bytes32 operationId);
 
+    error ValueTooLargeForuint96();
+
     error UnauthorizedOperation();
     // ============================
     // Events
@@ -59,7 +61,7 @@ contract PayNodeAdmin is TimelockController, AutomationCompatibleInterface, Reen
     /// @param scheduleTime The timestamp when the upgrade can be executed.
     /// @param caller The address that scheduled the upgrade.
     event UpgradeScheduled(
-        address indexed target, address indexed newImplementation, uint256 scheduleTime, address indexed caller
+        address indexed target, address indexed newImplementation, uint96 scheduleTime, address indexed caller
     );
     /// @notice Emitted when an upgrade is executed, either manually or via automation.
     /// @param target The proxy contract that was upgraded.
@@ -86,7 +88,7 @@ contract PayNodeAdmin is TimelockController, AutomationCompatibleInterface, Reen
     /// @param scheduleTime The timestamp when the role change can be executed (0 for cancellation).
     /// @param operationId The unique identifier for the role change operation.
     event RoleChangeScheduled(
-        address indexed account, bytes32 indexed role, bool grant, uint256 scheduleTime, bytes32 operationId
+        address indexed account, bytes32 indexed role, bool grant, uint96 scheduleTime, bytes32 operationId
     );
     /// @notice Emitted when a role change is executed.
     /// @param account The account modified.
@@ -107,7 +109,7 @@ contract PayNodeAdmin is TimelockController, AutomationCompatibleInterface, Reen
     struct PendingUpgrade {
         address target; // The proxy contract address.
         address newImplementation; // The new implementation contract address.
-        uint256 scheduleTime; // The timestamp when the upgrade can be executed.
+        uint96 scheduleTime; // The timestamp when the upgrade can be executed.
         bool exists; // Flag indicating if the upgrade is pending.
     }
 
@@ -128,7 +130,7 @@ contract PayNodeAdmin is TimelockController, AutomationCompatibleInterface, Reen
         address account; // The account to modify.
         bytes32 role; // The role to grant or revoke.
         bool grant; // True for grant, false for revoke.
-        uint256 scheduleTime; // When the change can be executed.
+        uint96 scheduleTime; // When the change can be executed.
         bool exists; // If the change is pending.
     }
 
@@ -199,7 +201,7 @@ contract PayNodeAdmin is TimelockController, AutomationCompatibleInterface, Reen
         if (pendingUpgrades[target].exists) revert UpgradeAlreadyPending(target);
 
         // Calculate the execution timestamp (current time + 2 days).
-        uint256 scheduledTime = block.timestamp + MIN_DELAY;
+        uint96 scheduledTime = safeCastToUint96(block.timestamp + MIN_DELAY);
         // Store the upgrade details in the pendingUpgrades mapping.
         pendingUpgrades[target] = PendingUpgrade({
             target: target,
@@ -349,15 +351,18 @@ contract PayNodeAdmin is TimelockController, AutomationCompatibleInterface, Reen
 
         bytes32 operationId = keccak256(abi.encode(account, role, grant, block.timestamp));
 
+         // Safe cast to uint96
+        uint96 scheduledTime = safeCastToUint96(block.timestamp + MIN_DELAY);
+
         pendingRoleChanges[operationId] = PendingRoleChange({
             account: account,
             role: role,
             grant: grant,
-            scheduleTime: block.timestamp + MIN_DELAY,
+            scheduleTime: scheduledTime,
             exists: true
         });
 
-        emit RoleChangeScheduled(account, role, grant, block.timestamp + MIN_DELAY, operationId);
+        emit RoleChangeScheduled(account, role, grant, scheduledTime, operationId);
     }
 
     /// @notice Executes a pending role change after the timelock period.
@@ -410,6 +415,16 @@ contract PayNodeAdmin is TimelockController, AutomationCompatibleInterface, Reen
             operationId
         );
     }
+
+    
+    // ============================
+    // Utility Functionality
+    // ============================
+
+    function safeCastToUint96(uint256 value) internal pure returns (uint96) {
+    if(value <= type(uint96).max) revert ValueTooLargeForuint96();
+    return uint96(value);
+}
 
     // ============================
     // Pause Functionality
