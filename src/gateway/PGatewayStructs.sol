@@ -51,17 +51,48 @@ library PGatewayStructs {
 
     /* ========== STRUCTS ========== */
 
-
+   /**
+ * @title IntegratorInfo
+ * @notice Stores metadata and statistics for each registered integrator on the platform.
+ * @dev Tracks fee configuration, registration timestamp, and overall activity metrics.
+ *
+ * @param isRegistered Indicates whether the integrator has completed registration.
+ * @param feeBps Integrator's fee rate in basis points (1% = 100 bps).
+ * @param name Display name or identifier for the integrator.
+ * @param registeredAt Timestamp when the integrator was registered.
+ * @param totalOrders Total number of orders initiated through this integrator.
+ * @param totalVolume Total cumulative transaction volume processed via this integrator.
+ */
 struct IntegratorInfo {
-    bool isRegistered;         // Whether integrator has registered
-    uint64 feeBps;             // Integrator's self-set fee in basis points
-    string name;               // Integrator's name/identifier
-    uint256 registeredAt;      // Timestamp of registration
-    uint256 totalOrders;       // Total orders from this integrator
-    uint256 totalVolume;       // Total volume processed
+    bool isRegistered;
+    uint64 feeBps;
+    string name;
+    uint256 registeredAt;
+    uint256 totalOrders;
+    uint256 totalVolume;
 }
 
-    struct InitiateGatewaySettingsParams {
+/**
+ * @title InitiateGatewaySettingsParams
+ * @notice Defines the parameters required to initialize the Gateway settings.
+ * @dev Used during deployment or upgrade to configure protocol fees, limits, and role addresses.
+ *
+ * @param initialOwner Address of the initial contract owner or admin.
+ * @param treasury Address where protocol fees are accumulated.
+ * @param aggregator Address of the on-chain rate or data aggregator (oracle or pricing source).
+ * @param protocolFee Base protocol fee in basis points.
+ * @param alphaLimit System threshold parameter for alpha operations.
+ * @param betaLimit System threshold parameter for beta operations.
+ * @param deltaLimit System threshold parameter for delta operations.
+ * @param integrator Default integrator address configured during initialization.
+ * @param integratorFee Default integrator fee in basis points.
+ * @param omegaLimit System threshold parameter for omega operations.
+ * @param titanLimit System threshold parameter for titan operations.
+ * @param orderExpiryWindow Default expiration time (in seconds) for new orders.
+ * @param proposalTimeout Timeout (in seconds) after which settlement proposals expire.
+ * @param intentExpiry Duration (in seconds) before provider intents become invalid.
+ */
+struct InitiateGatewaySettingsParams {
     address initialOwner;
     address treasury;
     address aggregator;
@@ -77,6 +108,7 @@ struct IntegratorInfo {
     uint256 proposalTimeout;
     uint256 intentExpiry;
 }
+
 
     /**
      * @title ProviderIntent

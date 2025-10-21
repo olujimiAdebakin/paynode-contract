@@ -60,6 +60,8 @@ interface IPayNodeAccessManager {
      */
     function FEE_MANAGER_ROLE() external view returns (bytes32);
 
+    function PROVIDER_ROLE() external view returns (bytes32);
+
     // ============================
     // System Flag Constants
     // ============================

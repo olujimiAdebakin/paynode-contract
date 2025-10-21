@@ -9,15 +9,114 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IPGatewaySettings} from "../interface/IPGatewaySettings.sol";
 import {IPayNodeAccessManager} from "../interface/IAccessManager.sol";
 import {PGatewaySettings} from "./PGatewaySettings.sol";
+import {IErrors} from "../interface/IErrors.sol";
 import "./PGatewayStructs.sol";
 
+
 /**
- * @title PayNode Gateway
- * @notice Non-custodial payment aggregator with parallel settlement and provider intent registry
- * @dev Implements upgradeable pattern, uses IPayNodeAccessManager for access control and reentrancy protection,
- *      and IPGatewaySettings for configuration. Uses PGatewayStructs for shared data structures.
+ * @title PayNode Gateway - Non-Custodial Payment Aggregator
+ * @notice Core settlement engine for off-ramp payments with parallel settlement and provider intent registry
+ * @dev Implements upgradeable UUPS pattern with comprehensive access control and reentrancy protection
+ * 
+ * ================================
+ * CONTRACT ARCHITECTURE & FLOW
+ * ================================
+ * 
+ * CORE INTEGRATION FLOW:
+ * ----------------------
+ * 1. User → PGateway (createOrder) → Funds escrowed → Order created
+ * 2. Aggregator → PGateway (createProposal) → Provider matched → Capacity reserved
+ * 3. Provider → PGateway (acceptProposal) → Settlement accepted → Status updated
+ * 4. Aggregator → PGateway (executeSettlement) → Funds distributed → Order fulfilled
+ * 
+ * CONTRACT ECOSYSTEM:
+ * -------------------
+ * ┌─────────────────┐    ┌──────────────────┐    ┌──────────────────┐
+ * │   PGateway      │◄──►│ PGatewaySettings │◄──►│  AccessManager   │
+ * │ (Main Engine)   │    │ (Configuration)  │    │ (Security Layer) │
+ * └─────────────────┘    └──────────────────┘    └──────────────────┘
+ *         ▲                       ▲                       ▲
+ *         │                       │                       │
+ *         ▼                       ▼                       ▼
+ * ┌─────────────────┐    ┌──────────────────┐    ┌──────────────────┐
+ * │ PGatewayStructs │    │   IError (Interface)  │  OpenZeppelin    │
+ * │ (Data Models)   │    │ (Error Standard) │    │  (Infrastructure)│
+ * └─────────────────┘    └──────────────────┘    └──────────────────┘
+ * 
+ * KEY INTEGRATION POINTS:
+ * -----------------------
+ * 
+ * 1. ACCESS CONTROL & SECURITY:
+ *    - IPayNodeAccessManager: Role-based access control and reentrancy protection
+ *    - OpenZeppelin Pausable: Emergency stop mechanism
+ *    - Custom modifiers: Provider validation, token whitelisting, order verification
+ * 
+ * 2. CONFIGURATION MANAGEMENT:
+ *    - IPGatewaySettings: Dynamic protocol parameters (fees, timeouts, limits)
+ *    - Tier system: Order classification (ALPHA, BETA, DELTA, OMEGA, TITAN)
+ *    - Token management: Supported ERC20 token validation
+ * 
+ * 3. DATA STRUCTURES:
+ *    - PGatewayStructs: Comprehensive data models for orders, proposals, intents, reputation
+ *    - Order lifecycle: PENDING → PROPOSED → ACCEPTED → FULFILLED/REFUNDED
+ *    - Provider intent: Capacity management and fee preferences
+ * 
+ * 4. ERROR HANDLING:
+ *    - IError: Standardized error interface for gas-efficient reverts
+ *    - Custom errors: Domain-specific validation failures
+ * 
+ * 5. UPGRADEABILITY:
+ *    - UUPS Upgradeable: Logic contract upgrades without state migration
+ *    - Initializable: Safe initialization pattern
+ * 
+ * ORDER LIFECYCLE FLOW:
+ * ----------------------
+ * 
+ * Phase 1: ORDER CREATION
+ *   User → createOrder() → Token transfer → Order escrowed → Event emitted
+ *   ├── Validates integrator registration
+ *   ├── Checks token support
+ *   ├── Prevents replay attacks with messageHash
+ *   └── Determines order tier based on amount
+ * 
+ * Phase 2: PROVIDER MATCHING
+ *   Aggregator → createProposal() → Provider matched → Capacity reserved
+ *   ├── Validates provider intent and capacity
+ *   ├── Ensures fee within provider's range
+ *   └── Updates order status to PROPOSED
+ * 
+ * Phase 3: SETTLEMENT EXECUTION
+ *   Provider → acceptProposal() → Settlement accepted
+ *   Aggregator → executeSettlement() → Funds distributed
+ *   ├── Calculates protocol, integrator, and provider fees
+ *   ├── Transfers funds to respective parties
+ *   └── Updates reputation metrics
+ * 
+ * Phase 4: REFUND & RECOVERY
+ *   Automatic refunds on timeout
+ *   User-initiated refunds after expiry
+ *   Provider capacity release on rejection
+ * 
+ * SECURITY FEATURES:
+ * ------------------
+ * - Reentrancy protection via AccessManager
+ * - Role-based access control (Admin, Aggregator, Provider)
+ * - Token whitelisting for supported assets
+ * - Order expiration and timeout mechanisms
+ * - Replay protection with user nonces and message hashes
+ * - Blacklisting for malicious actors
+ * - Upgradeability with proper authorization
+ * 
+ * FEE DISTRIBUTION MODEL:
+ * -----------------------
+ * Total Amount = Protocol Fee + Integrator Fee + Provider Amount
+ * - Protocol Fee: Platform revenue (configurable %)
+ * - Integrator Fee: dApp/partner share (self-configured)
+ * - Provider Amount: Remaining after fees (earns via exchange rate spread)
+ * 
+ * @author PayNode Protocol
  */
-contract PGateway is Initializable, PausableUpgradeable, UUPSUpgradeable {
+contract PGateway is Initializable, PausableUpgradeable, UUPSUpgradeable, IErrors{
     using SafeERC20 for IERC20;
 
     // Access Manager and Settings
@@ -25,46 +124,76 @@ contract PGateway is Initializable, PausableUpgradeable, UUPSUpgradeable {
     IPGatewaySettings public settings;
 
     // Core Mappings
+    /// @notice Tracks all orders created through the gateway
+    /// @dev Maps a unique orderId (hash) to its corresponding Order struct
     mapping(bytes32 => PGatewayStructs.Order) public orders;
+
+    /// @notice Stores settlement proposals submitted by providers
+    /// @dev Each proposal is indexed by a unique proposalId (hash)
     mapping(bytes32 => PGatewayStructs.SettlementProposal) public proposals;
+
+    /// @notice Records the most recent provider intent for each registered provider
+    /// @dev Provider address maps to a ProviderIntent struct describing liquidity and fee preferences
     mapping(address => PGatewayStructs.ProviderIntent) public providerIntents;
+
+    /// @notice Maintains reputation data for each provider
+    /// @dev Includes blacklist status, historical stats, and performance indicators
     mapping(address => PGatewayStructs.ProviderReputation) public providerReputation;
+
+    /// @notice Tracks per-user nonces to prevent replay attacks in off-chain signed actions
+    /// @dev Incremented for each user operation that relies on signature verification
     mapping(address => uint256) public userNonce;
+
+    /// @notice Flags proposals that have been executed and settled
+    /// @dev Prevents duplicate settlement execution for the same proposalId
     mapping(bytes32 => bool) public proposalExecuted;
 
-/// @notice Mapping of integrator addresses to their info
-mapping(address => PGatewayStructs.IntegratorInfo) public integratorRegistry;
+    /// @notice Mapping of integrator addresses to their info
+    mapping(address => PGatewayStructs.IntegratorInfo) public integratorRegistry;
 
-   /// @notice Mapping to track used message hashes (prevent replay)
-   mapping(bytes32 => bool) public usedMessageHashes;
+    /// @notice Mapping to track used message hashes (prevent replay)
+    mapping(bytes32 => bool) public usedMessageHashes;
 
-   /// @notice Maximum integrator fee allowed (5% = 500 basis points)
-uint64 public constant MAX_INTEGRATOR_FEE = 500;
+    /// @notice Maximum integrator fee allowed (5% = 500 basis points)
+    uint64 public constant MAX_INTEGRATOR_FEE = 500;
 
-/// @notice Minimum integrator fee (0.1% = 10 basis points)
-uint64 public constant MIN_INTEGRATOR_FEE = 10;
+    /// @notice Minimum integrator fee (0.1% = 10 basis points)
+    uint64 public constant MIN_INTEGRATOR_FEE = 10;
 
     /* ========== EVENTS ========== */
 
-    event IntegratorRegistered(
-    address indexed integrator,
-    uint64 feeBps,
-    string name,
-    uint256 timestamp
-);
+   /**
+ * @notice Emitted when a new integrator is successfully registered on the platform.
+ * @dev Includes integrator address, configured fee, chosen name, and registration timestamp.
+ *
+ * @param integrator Address of the newly registered integrator.
+ * @param feeBps Fee set by the integrator in basis points (1% = 100 bps).
+ * @param name Display name or identifier chosen by the integrator.
+ * @param timestamp Block timestamp when the registration occurred.
+ */
+event IntegratorRegistered(address indexed integrator, uint64 feeBps, string name, uint256 timestamp);
 
-event IntegratorFeeUpdated(
-    address indexed integrator,
-    uint64 oldFeeBps,
-    uint64 newFeeBps,
-    uint256 timestamp
-);
+/**
+ * @notice Emitted when an integrator updates their fee configuration.
+ * @dev Tracks both old and new fee values for auditability.
+ *
+ * @param integrator Address of the integrator whose fee was updated.
+ * @param oldFeeBps Previous fee rate in basis points.
+ * @param newFeeBps New fee rate in basis points.
+ * @param timestamp Block timestamp when the update was executed.
+ */
+event IntegratorFeeUpdated(address indexed integrator, uint64 oldFeeBps, uint64 newFeeBps, uint256 timestamp);
 
-event IntegratorNameUpdated(
-    address indexed integrator,
-    string newName,
-    uint256 timestamp
-);
+/**
+ * @notice Emitted when an integrator updates their registered display name.
+ * @dev Used for UI and identification purposes across integrated systems.
+ *
+ * @param integrator Address of the integrator whose name was updated.
+ * @param newName Updated name or identifier.
+ * @param timestamp Block timestamp when the name update occurred.
+ */
+event IntegratorNameUpdated(address indexed integrator, string newName, uint256 timestamp);
+
 
     /// @notice Emitted when a provider registers intent to provide liquidity
     /// @param provider Address of the provider
@@ -197,47 +326,47 @@ event IntegratorNameUpdated(
 
     /* ========== ERRORS ========== */
 
-    error InvalidAmount();
-    error InvalidAddress();
-    error InvalidFee();
-    error InvalidOrder();
-    error InvalidProposal();
-    error InvalidIntent();
-    error IntentNotExpired();
-    error OrderExpired();
-    error Unauthorized();
+    // error InvalidAmount();
+    // error InvalidAddress();
+    // error InvalidFee();
+    // error InvalidOrder();
+    // error InvalidProposal();
+    // error InvalidIntent();
+    // error IntentNotExpired();
+    // error OrderExpired();
+    // error Unauthorized();
     // error ProviderBlacklisted();
-    error TokenNotSupported();
+    // error TokenNotSupported();
 
     /* ========== MODIFIERS ========== */
 
-    /// @notice Ensures the caller is the aggregator
+     /// @notice Ensures the caller is the aggregator
     modifier onlyAggregator() {
-        require(accessManager.hasRole(accessManager.AGGREGATOR_ROLE(), msg.sender), "Unauthorized");
+        if (!accessManager.hasRole(accessManager.AGGREGATOR_ROLE(), msg.sender)) revert Unauthorized();
         _;
     }
 
     /// @notice Ensures the caller is not blacklisted
     modifier whenNotBlacklisted() {
-        require(!accessManager.isBlacklisted(msg.sender), "UserBlacklisted");
+        if (accessManager.isBlacklisted(msg.sender)) revert UserBlacklisted();
         _;
     }
 
     /// @notice Ensures the caller is a registered provider
     modifier onlyProvider() {
-        require(providerIntents[msg.sender].provider != address(0), "NotRegisteredProvider");
+        if (providerIntents[msg.sender].provider == address(0)) revert NotRegisteredProvider();
         _;
     }
 
     /// @notice Ensures the token is supported
     modifier validToken(address _token) {
-        require(settings.isTokenSupported(_token), "TokenNotSupported");
+        if (!settings.isTokenSupported(_token)) revert TokenNotSupported();
         _;
     }
 
     /// @notice Ensures the order exists
     modifier validOrder(bytes32 _orderId) {
-        require(orders[_orderId].user != address(0), "OrderNotFound");
+        if (orders[_orderId].user == address(0)) revert OrderNotFound();
         _;
     }
 
@@ -247,7 +376,7 @@ event IntegratorNameUpdated(
     /// @param _accessManager Address of the PayNodeAccessManager contract
     /// @param _settings Address of the PGatewaySettings contract
     function initialize(address _accessManager, address _settings) external initializer {
-        require(_accessManager != address(0) && _settings != address(0), "InvalidAddress");
+        if (_accessManager == address(0) || _settings == address(0)) revert InvalidAddress();
 
         __Pausable_init();
         __UUPSUpgradeable_init();
@@ -261,14 +390,14 @@ event IntegratorNameUpdated(
     /// @notice Pauses the contract
     /// @dev Requires DEFAULT_ADMIN_ROLE
     function pause() external {
-        require(accessManager.executeNonReentrant(msg.sender, accessManager.DEFAULT_ADMIN_ROLE()), "Unauthorized");
+        if (!accessManager.executeNonReentrant(msg.sender, accessManager.DEFAULT_ADMIN_ROLE())) revert Unauthorized();
         _pause();
     }
 
     /// @notice Unpauses the contract
     /// @dev Requires DEFAULT_ADMIN_ROLE
     function unpause() external {
-        require(accessManager.executeNonReentrant(msg.sender, accessManager.DEFAULT_ADMIN_ROLE()), "Unauthorized");
+        if (!accessManager.executeNonReentrant(msg.sender, accessManager.DEFAULT_ADMIN_ROLE())) revert Unauthorized();
         _unpause();
     }
 
@@ -276,14 +405,16 @@ event IntegratorNameUpdated(
     /// @param newImplementation Address of the new implementation contract
     /// @dev Requires ADMIN_ROLE
     function _authorizeUpgrade(address newImplementation) internal view override {
-         require(newImplementation != address(0), "Invalid implementation");
-        require(accessManager.hasRole(accessManager.ADMIN_ROLE(), msg.sender), "Unauthorized");
+        if (newImplementation == address(0)) revert InvalidAddress();
+        if (!accessManager.hasRole(accessManager.ADMIN_ROLE(), msg.sender)) revert Unauthorized();
     }
+
+
 
     /* ========== PROVIDER INTENT FUNCTIONS ========== */
 
     /// @notice Registers provider intent with available capacity
-    /// @param _currency Currency code (e.g., "USDT", "NGN", "USD")
+    /// @param _currency Currency code (e.g., "USDT", "CNGN", "USDC")
     /// @param _availableAmount Amount provider can handle
     /// @param _minFeeBps Minimum fee in basis points
     /// @param _maxFeeBps Maximum fee in basis points
@@ -295,14 +426,15 @@ event IntegratorNameUpdated(
         uint64 _maxFeeBps,
         uint256 _commitmentWindow
     ) external whenNotPaused whenNotBlacklisted {
-        require(accessManager.executeProviderNonReentrant(msg.sender), "InvalidProvider");
-        require(_availableAmount > 0, "InvalidAmount");
-        require(_minFeeBps <= _maxFeeBps, "InvalidFee");
-        require(_maxFeeBps <= settings.maxProtocolFee(), "InvalidFee");
-        require(_commitmentWindow > 0, "InvalidDuration");
+        if (!accessManager.executeProviderNonReentrant(msg.sender)) revert InvalidProvider();
+
+        if (_availableAmount == 0) revert InvalidAmount();
+        if (_minFeeBps > _maxFeeBps) revert InvalidFee();
+        if (_maxFeeBps > settings.maxProtocolFee()) revert InvalidFee();
+        if (_commitmentWindow == 0) revert InvalidDuration();
 
         address provider = msg.sender;
-        require(!providerReputation[provider].isBlacklisted, "ProviderBlacklisted");
+        if (providerReputation[provider].isBlacklisted) revert ErrorProviderBlacklisted();
 
         uint256 expiresAt = block.timestamp + settings.intentExpiry();
 
@@ -329,11 +461,11 @@ event IntegratorNameUpdated(
     /// @param _currency Currency code
     /// @param _newAmount New available amount
     function updateIntent(string calldata _currency, uint256 _newAmount) external onlyProvider whenNotPaused {
-        require(accessManager.executeProviderNonReentrant(msg.sender), "InvalidProvider");
-        require(_newAmount > 0, "InvalidAmount");
+        if (!accessManager.executeProviderNonReentrant(msg.sender)) revert ErrorProviderBlacklisted();
+        if (_newAmount == 0) revert InvalidAmount();
 
         PGatewayStructs.ProviderIntent storage intent = providerIntents[msg.sender];
-        require(intent.isActive, "InvalidIntent");
+        if (!intent.isActive) revert InvalidIntent();
 
         intent.availableAmount = _newAmount;
         intent.registeredAt = block.timestamp;
@@ -345,10 +477,10 @@ event IntegratorNameUpdated(
     /// @notice Expires provider intent
     /// @param _provider Provider address
     function expireIntent(address _provider) external onlyAggregator {
-        require(accessManager.executeAggregatorNonReentrant(msg.sender), "Unauthorized");
+        if (!accessManager.executeAggregatorNonReentrant(msg.sender)) revert Unauthorized();
         PGatewayStructs.ProviderIntent storage intent = providerIntents[_provider];
-        require(intent.isActive, "InvalidIntent");
-        require(block.timestamp > intent.expiresAt, "IntentNotExpired");
+        if (!intent.isActive) revert InvalidIntent();
+        if (block.timestamp <= intent.expiresAt) revert IntentNotExpired();
 
         intent.isActive = false;
         emit IntentExpired(_provider, intent.currency);
@@ -358,20 +490,21 @@ event IntegratorNameUpdated(
     /// @param _provider Provider address
     /// @param _amount Amount to reserve
     function reserveIntent(address _provider, uint256 _amount) external onlyAggregator {
-        require(accessManager.executeAggregatorNonReentrant(msg.sender), "Unauthorized");
+        if (!accessManager.executeAggregatorNonReentrant(msg.sender)) revert Unauthorized();
         PGatewayStructs.ProviderIntent storage intent = providerIntents[_provider];
-        require(intent.isActive, "InvalidIntent");
-        require(intent.availableAmount >= _amount, "InvalidAmount");
+        if (!intent.isActive) revert InvalidIntent();
+        if (intent.availableAmount < _amount) revert InvalidAmount();
 
         intent.availableAmount -= _amount;
     }
+
 
     /// @notice Releases reserved capacity if proposal is rejected or times out
     /// @param _provider Provider address
     /// @param _amount Amount to release
     /// @param _reason Reason for release
     function releaseIntent(address _provider, uint256 _amount, string calldata _reason) external onlyAggregator {
-        require(accessManager.executeAggregatorNonReentrant(msg.sender), "Unauthorized");
+        if (!accessManager.executeAggregatorNonReentrant(msg.sender)) revert Unauthorized();
         PGatewayStructs.ProviderIntent storage intent = providerIntents[_provider];
         intent.availableAmount += _amount;
         emit IntentReleased(_provider, intent.currency, _amount, _reason);
@@ -386,86 +519,83 @@ event IntegratorNameUpdated(
 
     // ==================== INTEGRATOR SELF-SERVICE FUNCTIONS ====================
 
-/// @notice Register as an integrator with PayNode
-/// @dev Anyone can register as an integrator. Sets initial fee within allowed range.
-/// @param _feeBps Desired fee in basis points (e.g., 100 = 1%)
-/// @param _name Integrator's name (e.g., "Azza", "CoolWallet")
-function registerAsIntegrator(
-    uint64 _feeBps,
-    string calldata _name
-) external {
-    require(!integratorRegistry[msg.sender].isRegistered, "AlreadyRegistered");
-    require(_feeBps >= MIN_INTEGRATOR_FEE && _feeBps <= MAX_INTEGRATOR_FEE, "FeeOutOfRange");
-    require(bytes(_name).length > 0 && bytes(_name).length <= 50, "InvalidName");
+    /// @notice Register as an integrator with PayNode
+    /// @dev Anyone can register as an integrator. Sets initial fee within allowed range.
+    /// @param _feeBps Desired fee in basis points (e.g., 100 = 1%)
+    /// @param _name Integrator's name (e.g., "Azza", "CoolWallet")
+    function registerAsIntegrator(uint64 _feeBps, string calldata _name) external {
+        if (integratorRegistry[msg.sender].isRegistered) revert AlreadyRegistered();
+        if (_feeBps < MIN_INTEGRATOR_FEE || _feeBps > MAX_INTEGRATOR_FEE) revert FeeOutOfRange();
+        if (bytes(_name).length == 0 || bytes(_name).length > 50) revert InvalidName();
 
-    integratorRegistry[msg.sender] = PGatewayStructs.IntegratorInfo({
-        isRegistered: true,
-        feeBps: _feeBps,
-        name: _name,
-        registeredAt: block.timestamp,
-        totalOrders: 0,
-        totalVolume: 0
-    });
+        integratorRegistry[msg.sender] = PGatewayStructs.IntegratorInfo({
+            isRegistered: true,
+            feeBps: _feeBps,
+            name: _name,
+            registeredAt: block.timestamp,
+            totalOrders: 0,
+            totalVolume: 0
+        });
 
-    emit IntegratorRegistered(msg.sender, _feeBps, _name, block.timestamp);
-}
+        emit IntegratorRegistered(msg.sender, _feeBps, _name, block.timestamp);
+    }
 
-/// @notice Update integrator's fee
-/// @dev Only the integrator themselves can update their fee. Can be called anytime.
-/// @param _newFeeBps New fee in basis points (must be within allowed range)
-function updateIntegratorFee(uint64 _newFeeBps) external {
-    require(integratorRegistry[msg.sender].isRegistered, "NotRegistered");
-    require(_newFeeBps >= MIN_INTEGRATOR_FEE && _newFeeBps <= MAX_INTEGRATOR_FEE, "FeeOutOfRange");
+    /// @notice Update integrator's fee
+    /// @dev Only the integrator themselves can update their fee. Can be called anytime.
+    /// @param _newFeeBps New fee in basis points (must be within allowed range)
+    function updateIntegratorFee(uint64 _newFeeBps) external {
+        if (!integratorRegistry[msg.sender].isRegistered) revert NotRegistered();
+        if (_newFeeBps < MIN_INTEGRATOR_FEE || _newFeeBps > MAX_INTEGRATOR_FEE) revert FeeOutOfRange();
 
-    uint64 oldFee = integratorRegistry[msg.sender].feeBps;
-    integratorRegistry[msg.sender].feeBps = _newFeeBps;
+        uint64 oldFee = integratorRegistry[msg.sender].feeBps;
+        integratorRegistry[msg.sender].feeBps = _newFeeBps;
 
-    emit IntegratorFeeUpdated(msg.sender, oldFee, _newFeeBps, block.timestamp);
-}
+        emit IntegratorFeeUpdated(msg.sender, oldFee, _newFeeBps, block.timestamp);
+    }
 
-/// @notice Update integrator's name
-/// @dev Only the integrator themselves can update their name
-/// @param _newName New name for the integrator
-function updateIntegratorName(string calldata _newName) external {
-    require(integratorRegistry[msg.sender].isRegistered, "NotRegistered");
-    require(bytes(_newName).length > 0 && bytes(_newName).length <= 50, "InvalidName");
+    /// @notice Update integrator's name
+    /// @dev Only the integrator themselves can update their name
+    /// @param _newName New name for the integrator
+    function updateIntegratorName(string calldata _newName) external {
+        if (!integratorRegistry[msg.sender].isRegistered) revert NotRegistered();
+        if (bytes(_newName).length == 0 || bytes(_newName).length > 50) revert InvalidName();
 
-    integratorRegistry[msg.sender].name = _newName;
+        integratorRegistry[msg.sender].name = _newName;
 
-    emit IntegratorNameUpdated(msg.sender, _newName, block.timestamp);
-}
+        emit IntegratorNameUpdated(msg.sender, _newName, block.timestamp);
+    }
 
     /* ========== ORDER CREATION FUNCTIONS ========== */
 
     /// @notice Creates a new payment order
-/// @dev User calls this via dApp frontend. Integrator address is auto-filled by dApp.
-///      Contract validates integrator is registered and uses their current fee rate.
-///      Message hash prevents replay attacks and links on-chain order to off-chain details.
-/// @param _token ERC20 token address to offramp
-/// @param _amount Order amount (full amount, fees deducted at settlement)
-/// @param _refundAddress Address to refund to if order fails or is cancelled
-/// @param _integrator Address of the dApp/integrator (must be registered)
-/// @param _messageHash Unique hash of off-chain order details (user info, bank details, etc.)
-/// @return orderId Generated unique order ID
-    function createOrder(address _token, uint256 _amount, address _refundAddress, address _integrator,
-    uint64 _integratorFee,
-     bytes32 _messageHash)
-        external
-        whenNotPaused
-        whenNotBlacklisted
-        validToken(_token)
-        returns (bytes32 orderId)
-    {
-        require(_amount > 0, "InvalidAmount");
-        require(_refundAddress != address(0), "InvalidAddress");
-        require(_integrator != address(0), "InvalidAddress");
-        require(bytes32(_messageHash).length > 0, "InvalidMessageHash");
-        require(accessManager.executeNonReentrant(msg.sender, bytes32(0)), "Unauthorized");
+    /// @dev User calls this via dApp frontend. Integrator address is auto-filled by dApp.
+    ///      Contract validates integrator is registered and uses their current fee rate.
+    ///      Message hash prevents replay attacks and links on-chain order to off-chain details.
+    /// @param _token ERC20 token address to offramp
+    /// @param _amount Order amount (full amount, fees deducted at settlement)
+    /// @param _refundAddress Address to refund to if order fails or is cancelled
+    /// @param _integrator Address of the dApp/integrator (must be registered)
+    /// @param _messageHash Unique hash of off-chain order details (user info, bank details, etc.)
+    /// @return orderId Generated unique order ID
+    function createOrder(
+        address _token,
+        uint256 _amount,
+        address _refundAddress,
+        address _integrator,
+        uint64 _integratorFee,
+        bytes32 _messageHash
+    ) external whenNotPaused whenNotBlacklisted validToken(_token) returns (bytes32 orderId) {
+          if (_amount == 0) revert InvalidAmount();
+        if (_refundAddress == address(0)) revert InvalidAddress();
+        if (_integrator == address(0)) revert InvalidAddress();
+        if (bytes32(_messageHash).length == 0) revert InvalidMessageHash();
+        if (!accessManager.executeNonReentrant(msg.sender, bytes32(0))) revert Unauthorized();
 
-         // SECURITY: Prevents replay attacks with messageHash
-    bytes32 msgHash = keccak256(abi.encodePacked(_messageHash));
-    require(!usedMessageHashes[msgHash], "MessageHashAlreadyUsed");
-    usedMessageHashes[msgHash] = true;
+        // SECURITY: Prevents replay attacks with messageHash
+        bytes32 msgHash = keccak256(abi.encodePacked(_messageHash));
+        if (usedMessageHashes[msgHash]) revert MessageHashAlreadyUsed();
+        usedMessageHashes[msgHash] = true;
+        // if (!usedMessageHashes[msgHash]) revert MessageHashAlreadyUsed();
 
         PGatewayStructs.OrderTier tier = _determineTier(_amount);
 
@@ -486,9 +616,9 @@ function updateIntegratorName(string calldata _newName) external {
             expiresAt: block.timestamp + settings.orderExpiryWindow(),
             acceptedProposalId: bytes32(0),
             fulfilledByProvider: address(0),
-            integrator: _integrator, 
+            integrator: _integrator,
             integratorFee: _integratorFee,
-            _messageHash: bytes32(0) 
+            _messageHash: bytes32(0)
         });
 
         emit OrderCreated(orderId, msg.sender, _token, _amount, tier, orders[orderId].expiresAt, _messageHash);
@@ -526,15 +656,15 @@ function updateIntegratorName(string calldata _newName) external {
         validOrder(_orderId)
         returns (bytes32 proposalId)
     {
-        require(accessManager.executeAggregatorNonReentrant(msg.sender), "Unauthorized");
+        if (!accessManager.executeAggregatorNonReentrant(msg.sender)) revert Unauthorized();
         PGatewayStructs.Order storage order = orders[_orderId];
-        require(order.status == PGatewayStructs.OrderStatus.PENDING, "InvalidOrder");
-        require(block.timestamp < order.expiresAt, "OrderExpired");
+        if (order.status != PGatewayStructs.OrderStatus.PENDING) revert InvalidOrder();
+        if (block.timestamp >= order.expiresAt) revert OrderExpired();
 
         PGatewayStructs.ProviderIntent memory intent = providerIntents[_provider];
-        require(intent.isActive, "InvalidIntent");
-        require(intent.availableAmount >= order.amount, "InvalidAmount");
-        require(_proposedFeeBps >= intent.minFeeBps && _proposedFeeBps <= intent.maxFeeBps, "InvalidFee");
+        if (!intent.isActive) revert InvalidIntent();
+        if (intent.availableAmount < order.amount) revert InvalidAmount();
+        if (_proposedFeeBps < intent.minFeeBps || _proposedFeeBps > intent.maxFeeBps) revert InvalidFee();
 
         proposalId = keccak256(abi.encode(_orderId, _provider, block.timestamp, block.number));
         uint256 deadline = block.timestamp + settings.proposalTimeout();
@@ -558,11 +688,11 @@ function updateIntegratorName(string calldata _newName) external {
     /// @notice Provider accepts a settlement proposal
     /// @param _proposalId Proposal ID to accept
     function acceptProposal(bytes32 _proposalId) external onlyProvider whenNotPaused {
-        require(accessManager.executeProviderNonReentrant(msg.sender), "InvalidProvider");
+         if (!accessManager.executeProviderNonReentrant(msg.sender)) revert InvalidProvider();
         PGatewayStructs.SettlementProposal storage proposal = proposals[_proposalId];
-        require(proposal.provider == msg.sender, "Unauthorized");
-        require(proposal.status == PGatewayStructs.ProposalStatus.PENDING, "InvalidProposal");
-        require(block.timestamp < proposal.proposalDeadline, "InvalidProposal");
+        if (proposal.provider != msg.sender) revert Unauthorized();
+        if (proposal.status != PGatewayStructs.ProposalStatus.PENDING) revert InvalidProposal();
+        if (block.timestamp >= proposal.proposalDeadline) revert InvalidProposal();
 
         proposal.status = PGatewayStructs.ProposalStatus.ACCEPTED;
         PGatewayStructs.Order storage order = orders[proposal.orderId];
@@ -577,10 +707,10 @@ function updateIntegratorName(string calldata _newName) external {
     /// @param _proposalId Proposal ID to reject
     /// @param _reason Reason for rejection
     function rejectProposal(bytes32 _proposalId, string calldata _reason) external onlyProvider {
-        require(accessManager.executeProviderNonReentrant(msg.sender), "InvalidProvider");
+        if (!accessManager.executeProviderNonReentrant(msg.sender)) revert InvalidProvider();
         PGatewayStructs.SettlementProposal storage proposal = proposals[_proposalId];
-        require(proposal.provider == msg.sender, "Unauthorized");
-        require(proposal.status == PGatewayStructs.ProposalStatus.PENDING, "InvalidProposal");
+        if (proposal.provider != msg.sender) revert Unauthorized();
+        if (proposal.status != PGatewayStructs.ProposalStatus.PENDING) revert InvalidProposal();
 
         proposal.status = PGatewayStructs.ProposalStatus.REJECTED;
         providerReputation[msg.sender].noShowCount++;
@@ -590,10 +720,10 @@ function updateIntegratorName(string calldata _newName) external {
     /// @notice Marks a proposal as timed out
     /// @param _proposalId Proposal ID
     function timeoutProposal(bytes32 _proposalId) external onlyAggregator {
-        require(accessManager.executeAggregatorNonReentrant(msg.sender), "Unauthorized");
+       if (!accessManager.executeAggregatorNonReentrant(msg.sender)) revert Unauthorized();
         PGatewayStructs.SettlementProposal storage proposal = proposals[_proposalId];
-        require(proposal.status == PGatewayStructs.ProposalStatus.PENDING, "InvalidProposal");
-        require(block.timestamp > proposal.proposalDeadline, "InvalidProposal");
+        if (proposal.status != PGatewayStructs.ProposalStatus.PENDING) revert InvalidProposal();
+        if (block.timestamp <= proposal.proposalDeadline) revert InvalidProposal();
 
         proposal.status = PGatewayStructs.ProposalStatus.TIMEOUT;
         emit SettlementProposalTimeout(_proposalId, proposal.provider);
@@ -609,34 +739,34 @@ function updateIntegratorName(string calldata _newName) external {
     /* ========== SETTLEMENT EXECUTION FUNCTIONS ========== */
 
     /// @notice Executes settlement after proposal acceptance and distributes funds from escrow
-/// @dev Settlement Flow:
-///      1. Validates proposal is ACCEPTED and not already executed
-///      2. Validates associated order is in ACCEPTED status
-///      3. Calculates all fees from the proposed amount:
-///         - Protocol fee: Platform's fee sent to treasury
-///         - Integrator fee: dApp's fee (set by integrator) sent to integrator address
-///         - Provider fee: Provider's margin (calculated for tracking, not transferred separately)
-///      4. Distributes escrowed funds:
-///         - Protocol fee → Treasury
-///         - Integrator fee → Integrator
-///         - Remaining amount → Provider (who sends fiat to user off-chain)
-///      5. Marks proposal as executed and order as FULFILLED
-///      6. Updates provider success metrics
-///      7. Emits settlement event with full breakdown
-///      
-///      Note: Provider's margin (providerFee) is earned through their exchange rate markup
-///      off-chain and is not deducted as a separate transfer. The provider receives the
-///      remaining amount after protocol and integrator fees are deducted.
-///
-/// @param _proposalId The ID of the accepted proposal to execute settlement for
+    /// @dev Settlement Flow:
+    ///      1. Validates proposal is ACCEPTED and not already executed
+    ///      2. Validates associated order is in ACCEPTED status
+    ///      3. Calculates all fees from the proposed amount:
+    ///         - Protocol fee: Platform's fee sent to treasury
+    ///         - Integrator fee: dApp's fee (set by integrator) sent to integrator address
+    ///         - Provider fee: Provider's margin (calculated for tracking, not transferred separately)
+    ///      4. Distributes escrowed funds:
+    ///         - Protocol fee → Treasury
+    ///         - Integrator fee → Integrator
+    ///         - Remaining amount → Provider (who sends fiat to user off-chain)
+    ///      5. Marks proposal as executed and order as FULFILLED
+    ///      6. Updates provider success metrics
+    ///      7. Emits settlement event with full breakdown
+    ///
+    ///      Note: Provider's margin (providerFee) is earned through their exchange rate markup
+    ///      off-chain and is not deducted as a separate transfer. The provider receives the
+    ///      remaining amount after protocol and integrator fees are deducted.
+    ///
+    /// @param _proposalId The ID of the accepted proposal to execute settlement for
     function executeSettlement(bytes32 _proposalId) external onlyAggregator {
-        require(accessManager.executeAggregatorNonReentrant(msg.sender), "Unauthorized");
+       if (!accessManager.executeAggregatorNonReentrant(msg.sender)) revert Unauthorized();
         PGatewayStructs.SettlementProposal storage proposal = proposals[_proposalId];
-        require(proposal.status == PGatewayStructs.ProposalStatus.ACCEPTED, "InvalidProposal");
-        require(!proposalExecuted[_proposalId], "InvalidProposal");
+        if (proposal.status != PGatewayStructs.ProposalStatus.ACCEPTED) revert InvalidProposal();
+        if (proposalExecuted[_proposalId]) revert InvalidProposal();
 
         PGatewayStructs.Order storage order = orders[proposal.orderId];
-        require(order.status == PGatewayStructs.OrderStatus.ACCEPTED, "InvalidOrder");
+        if (order.status != PGatewayStructs.OrderStatus.ACCEPTED) revert InvalidOrder();
 
         uint256 integratorFee = (proposal.proposedAmount * order.integratorFee) / settings.MAX_BPS();
         uint256 protocolFee = (proposal.proposedAmount * settings.protocolFeePercent()) / settings.MAX_BPS();
@@ -653,7 +783,14 @@ function updateIntegratorName(string calldata _newName) external {
         _updateProviderSuccess(proposal.provider, block.timestamp - proposal.proposedAt);
 
         emit SettlementExecuted(
-            proposal.orderId, _proposalId, proposal.provider, providerAmount, proposal.proposedFeeBps, protocolFee, integratorFee, providerFee
+            proposal.orderId,
+            _proposalId,
+            proposal.provider,
+            providerAmount,
+            proposal.proposedFeeBps,
+            protocolFee,
+            integratorFee,
+            providerFee
         );
     }
 
@@ -662,11 +799,11 @@ function updateIntegratorName(string calldata _newName) external {
     /// @notice Refunds an order if no provider accepts within timeout
     /// @param _orderId Order ID to refund
     function refundOrder(bytes32 _orderId) external onlyAggregator validOrder(_orderId) {
-        require(accessManager.executeAggregatorNonReentrant(msg.sender), "Unauthorized");
+        if (!accessManager.executeAggregatorNonReentrant(msg.sender)) revert Unauthorized();
         PGatewayStructs.Order storage order = orders[_orderId];
-        require(order.status != PGatewayStructs.OrderStatus.FULFILLED, "InvalidOrder");
-        require(order.status != PGatewayStructs.OrderStatus.REFUNDED, "InvalidOrder");
-        require(block.timestamp > order.expiresAt, "OrderNotExpired");
+        if (order.status == PGatewayStructs.OrderStatus.FULFILLED) revert InvalidOrder();
+        if (order.status == PGatewayStructs.OrderStatus.REFUNDED) revert InvalidOrder();
+        if (block.timestamp <= order.expiresAt) revert OrderNotExpired();
 
         order.status = PGatewayStructs.OrderStatus.REFUNDED;
         IERC20(order.token).safeTransfer(order.refundAddress, order.amount);
@@ -677,14 +814,13 @@ function updateIntegratorName(string calldata _newName) external {
     /// @notice Allows user to request a refund
     /// @param _orderId Order ID to refund
     function requestRefund(bytes32 _orderId) external validOrder(_orderId) {
-        require(accessManager.executeNonReentrant(msg.sender, bytes32(0)), "Unauthorized");
+        if (!accessManager.executeNonReentrant(msg.sender, bytes32(0))) revert Unauthorized();
         PGatewayStructs.Order storage order = orders[_orderId];
-        require(order.user == msg.sender, "Unauthorized");
-        require(
-            order.status == PGatewayStructs.OrderStatus.PENDING || order.status == PGatewayStructs.OrderStatus.PROPOSED,
-            "InvalidOrder"
-        );
-        require(block.timestamp > order.expiresAt, "OrderNotExpired");
+        if (order.user != msg.sender) revert Unauthorized();
+        if (
+            order.status != PGatewayStructs.OrderStatus.PENDING && order.status != PGatewayStructs.OrderStatus.PROPOSED
+        ) revert InvalidOrder();
+        if (block.timestamp <= order.expiresAt) revert OrderNotExpired();
 
         order.status = PGatewayStructs.OrderStatus.CANCELLED;
         IERC20(order.token).safeTransfer(order.refundAddress, order.amount);
@@ -710,8 +846,8 @@ function updateIntegratorName(string calldata _newName) external {
     /// @notice Flags a provider as fraudulent
     /// @param _provider Provider address
     function flagFraudulent(address _provider) external onlyAggregator {
-        require(accessManager.executeAggregatorNonReentrant(msg.sender), "Unauthorized");
-        require(providerReputation[_provider].provider != address(0), "InvalidAddress");
+        if (!accessManager.executeAggregatorNonReentrant(msg.sender)) revert Unauthorized();
+        if (providerReputation[_provider].provider == address(0)) revert InvalidAddress();
         providerReputation[_provider].isFraudulent = true;
         providerIntents[_provider].isActive = false;
 
@@ -722,7 +858,7 @@ function updateIntegratorName(string calldata _newName) external {
     /// @param _provider Provider address
     /// @param _reason Reason for blacklisting
     function blacklistProvider(address _provider, string calldata _reason) external {
-        require(accessManager.executeNonReentrant(msg.sender, accessManager.DEFAULT_ADMIN_ROLE()), "Unauthorized");
+        if (!accessManager.executeNonReentrant(msg.sender, accessManager.DEFAULT_ADMIN_ROLE())) revert Unauthorized();
         providerReputation[_provider].isBlacklisted = true;
         providerIntents[_provider].isActive = false;
 
@@ -750,11 +886,15 @@ function updateIntegratorName(string calldata _newName) external {
     }
 
     /// @notice Get integrator information
-/// @param _integrator Address of the integrator
-/// @return info Complete integrator information
-function getIntegratorInfo(address _integrator) external view returns (PGatewayStructs.IntegratorInfo memory info) {
-    return integratorRegistry[_integrator];
-}
+    /// @param _integrator Address of the integrator
+    /// @return info Complete integrator information
+    function getIntegratorInfo(address _integrator)
+        external
+        view
+        returns (PGatewayStructs.IntegratorInfo memory info)
+    {
+        return integratorRegistry[_integrator];
+    }
 
     // Reserve for upgrades
     uint256[50] private __gap;
