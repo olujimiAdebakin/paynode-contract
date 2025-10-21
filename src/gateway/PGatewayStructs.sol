@@ -51,6 +51,16 @@ library PGatewayStructs {
 
     /* ========== STRUCTS ========== */
 
+
+struct IntegratorInfo {
+    bool isRegistered;         // Whether integrator has registered
+    uint64 feeBps;             // Integrator's self-set fee in basis points
+    string name;               // Integrator's name/identifier
+    uint256 registeredAt;      // Timestamp of registration
+    uint256 totalOrders;       // Total orders from this integrator
+    uint256 totalVolume;       // Total volume processed
+}
+
     struct InitiateGatewaySettingsParams {
     address initialOwner;
     address treasury;
@@ -123,7 +133,8 @@ library PGatewayStructs {
         bytes32 acceptedProposalId;
         address fulfilledByProvider;
         address integrator; // dApp or partner that integrated PayNode
-        uint256 integratorFee; // Fee charged by the integrator in basis points
+        uint256 integratorFee;
+        bytes32 _messageHash;
     }
 
     /**

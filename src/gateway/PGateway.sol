@@ -32,7 +32,39 @@ contract PGateway is Initializable, PausableUpgradeable, UUPSUpgradeable {
     mapping(address => uint256) public userNonce;
     mapping(bytes32 => bool) public proposalExecuted;
 
+/// @notice Mapping of integrator addresses to their info
+mapping(address => PGatewayStructs.IntegratorInfo) public integratorRegistry;
+
+   /// @notice Mapping to track used message hashes (prevent replay)
+   mapping(bytes32 => bool) public usedMessageHashes;
+
+   /// @notice Maximum integrator fee allowed (5% = 500 basis points)
+uint64 public constant MAX_INTEGRATOR_FEE = 500;
+
+/// @notice Minimum integrator fee (0.1% = 10 basis points)
+uint64 public constant MIN_INTEGRATOR_FEE = 10;
+
     /* ========== EVENTS ========== */
+
+    event IntegratorRegistered(
+    address indexed integrator,
+    uint64 feeBps,
+    string name,
+    uint256 timestamp
+);
+
+event IntegratorFeeUpdated(
+    address indexed integrator,
+    uint64 oldFeeBps,
+    uint64 newFeeBps,
+    uint256 timestamp
+);
+
+event IntegratorNameUpdated(
+    address indexed integrator,
+    string newName,
+    uint256 timestamp
+);
 
     /// @notice Emitted when a provider registers intent to provide liquidity
     /// @param provider Address of the provider
@@ -80,7 +112,8 @@ contract PGateway is Initializable, PausableUpgradeable, UUPSUpgradeable {
         address token,
         uint256 amount,
         PGatewayStructs.OrderTier tier,
-        uint256 expiresAt
+        uint256 expiresAt,
+        bytes32 messageHash
     );
 
     /// @notice Emitted when a provider creates a settlement proposal
@@ -243,6 +276,7 @@ contract PGateway is Initializable, PausableUpgradeable, UUPSUpgradeable {
     /// @param newImplementation Address of the new implementation contract
     /// @dev Requires ADMIN_ROLE
     function _authorizeUpgrade(address newImplementation) internal view override {
+         require(newImplementation != address(0), "Invalid implementation");
         require(accessManager.hasRole(accessManager.ADMIN_ROLE(), msg.sender), "Unauthorized");
     }
 
@@ -350,14 +384,72 @@ contract PGateway is Initializable, PausableUpgradeable, UUPSUpgradeable {
         return providerIntents[_provider];
     }
 
+    // ==================== INTEGRATOR SELF-SERVICE FUNCTIONS ====================
+
+/// @notice Register as an integrator with PayNode
+/// @dev Anyone can register as an integrator. Sets initial fee within allowed range.
+/// @param _feeBps Desired fee in basis points (e.g., 100 = 1%)
+/// @param _name Integrator's name (e.g., "Azza", "CoolWallet")
+function registerAsIntegrator(
+    uint64 _feeBps,
+    string calldata _name
+) external {
+    require(!integratorRegistry[msg.sender].isRegistered, "AlreadyRegistered");
+    require(_feeBps >= MIN_INTEGRATOR_FEE && _feeBps <= MAX_INTEGRATOR_FEE, "FeeOutOfRange");
+    require(bytes(_name).length > 0 && bytes(_name).length <= 50, "InvalidName");
+
+    integratorRegistry[msg.sender] = PGatewayStructs.IntegratorInfo({
+        isRegistered: true,
+        feeBps: _feeBps,
+        name: _name,
+        registeredAt: block.timestamp,
+        totalOrders: 0,
+        totalVolume: 0
+    });
+
+    emit IntegratorRegistered(msg.sender, _feeBps, _name, block.timestamp);
+}
+
+/// @notice Update integrator's fee
+/// @dev Only the integrator themselves can update their fee. Can be called anytime.
+/// @param _newFeeBps New fee in basis points (must be within allowed range)
+function updateIntegratorFee(uint64 _newFeeBps) external {
+    require(integratorRegistry[msg.sender].isRegistered, "NotRegistered");
+    require(_newFeeBps >= MIN_INTEGRATOR_FEE && _newFeeBps <= MAX_INTEGRATOR_FEE, "FeeOutOfRange");
+
+    uint64 oldFee = integratorRegistry[msg.sender].feeBps;
+    integratorRegistry[msg.sender].feeBps = _newFeeBps;
+
+    emit IntegratorFeeUpdated(msg.sender, oldFee, _newFeeBps, block.timestamp);
+}
+
+/// @notice Update integrator's name
+/// @dev Only the integrator themselves can update their name
+/// @param _newName New name for the integrator
+function updateIntegratorName(string calldata _newName) external {
+    require(integratorRegistry[msg.sender].isRegistered, "NotRegistered");
+    require(bytes(_newName).length > 0 && bytes(_newName).length <= 50, "InvalidName");
+
+    integratorRegistry[msg.sender].name = _newName;
+
+    emit IntegratorNameUpdated(msg.sender, _newName, block.timestamp);
+}
+
     /* ========== ORDER CREATION FUNCTIONS ========== */
 
     /// @notice Creates a new payment order
-    /// @param _token ERC20 token address
-    /// @param _amount Order amount
-    /// @param _refundAddress Address for refunds
-    /// @return orderId Generated unique order ID
-    function createOrder(address _token, uint256 _amount, address _refundAddress, string calldata _messageHash)
+/// @dev User calls this via dApp frontend. Integrator address is auto-filled by dApp.
+///      Contract validates integrator is registered and uses their current fee rate.
+///      Message hash prevents replay attacks and links on-chain order to off-chain details.
+/// @param _token ERC20 token address to offramp
+/// @param _amount Order amount (full amount, fees deducted at settlement)
+/// @param _refundAddress Address to refund to if order fails or is cancelled
+/// @param _integrator Address of the dApp/integrator (must be registered)
+/// @param _messageHash Unique hash of off-chain order details (user info, bank details, etc.)
+/// @return orderId Generated unique order ID
+    function createOrder(address _token, uint256 _amount, address _refundAddress, address _integrator,
+    uint64 _integratorFee,
+     bytes32 _messageHash)
         external
         whenNotPaused
         whenNotBlacklisted
@@ -366,7 +458,14 @@ contract PGateway is Initializable, PausableUpgradeable, UUPSUpgradeable {
     {
         require(_amount > 0, "InvalidAmount");
         require(_refundAddress != address(0), "InvalidAddress");
+        require(_integrator != address(0), "InvalidAddress");
+        require(bytes32(_messageHash).length > 0, "InvalidMessageHash");
         require(accessManager.executeNonReentrant(msg.sender, bytes32(0)), "Unauthorized");
+
+         // SECURITY: Prevents replay attacks with messageHash
+    bytes32 msgHash = keccak256(abi.encodePacked(_messageHash));
+    require(!usedMessageHashes[msgHash], "MessageHashAlreadyUsed");
+    usedMessageHashes[msgHash] = true;
 
         PGatewayStructs.OrderTier tier = _determineTier(_amount);
 
@@ -387,11 +486,12 @@ contract PGateway is Initializable, PausableUpgradeable, UUPSUpgradeable {
             expiresAt: block.timestamp + settings.orderExpiryWindow(),
             acceptedProposalId: bytes32(0),
             fulfilledByProvider: address(0),
-            integrator: settings.aggregatorAddress(),
-            integratorFee: settings.integratorFeePercent() 
+            integrator: _integrator, 
+            integratorFee: _integratorFee,
+            _messageHash: bytes32(0) 
         });
 
-        emit OrderCreated(orderId, msg.sender, _token, _amount, tier, orders[orderId].expiresAt);
+        emit OrderCreated(orderId, msg.sender, _token, _amount, tier, orders[orderId].expiresAt, _messageHash);
         return orderId;
     }
 
@@ -648,6 +748,13 @@ contract PGateway is Initializable, PausableUpgradeable, UUPSUpgradeable {
     function getUserNonce(address _user) external view returns (uint256) {
         return userNonce[_user];
     }
+
+    /// @notice Get integrator information
+/// @param _integrator Address of the integrator
+/// @return info Complete integrator information
+function getIntegratorInfo(address _integrator) external view returns (PGatewayStructs.IntegratorInfo memory info) {
+    return integratorRegistry[_integrator];
+}
 
     // Reserve for upgrades
     uint256[50] private __gap;
