@@ -1333,8 +1333,7 @@ This project is licensed under the MIT License. See the `LICENSE` file for detai
 
 Connect with the author of this project!
 
-*   LinkedIn: [YourLinkedInProfile](https://linkedin.com/in/olujimiadebakin)
-*   Twitter: [@YourTwitterHandle](https://twitter.com/YourTwitterHandle)
+*   Twitter: [@olujimi_the_dev](https://twitter.com/https://x.com/olujimi_the_dev)
 
 ---
 
