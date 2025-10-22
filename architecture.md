@@ -19,7 +19,7 @@ Key Principles:
 ⚡ Parallel proposal execution
 
 🧱 Upgradeable and role-secured architecture
-
+<!-- forge inspect src/interface/IAccessManager.sol abi -->
 System Architecture
 ┌───────────────────────────────────────────────────────────┐
 │                      AccessManager                        │
