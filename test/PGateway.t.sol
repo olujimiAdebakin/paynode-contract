@@ -30,14 +30,19 @@ contract PGatewayTest is Test, TestConstants {
     function setUp() public {
         console.log("Setting up test environment...");
         
-        // Setup accounts
+        // Setup accounts with ETH
         vm.deal(owner, 100 ether);
         vm.deal(user, 100 ether);
         vm.deal(provider, 100 ether);
         
-        // Deploy contracts
+        // Deploy MockAccessManager with owner as superAdmin
+        // This automatically grants owner the DEFAULT_ADMIN_ROLE
         accessManager = new MockAccessManager(owner);
+        console.log("AccessManager deployed, owner has DEFAULT_ADMIN_ROLE");
+        
+        // Deploy test token
         testToken = new MockERC20("Test Token", "TEST");
+        console.log("Test token deployed");
         
         // Create settings params
         settingsParams = PGatewayStructs.InitiateGatewaySettingsParams({
@@ -67,28 +72,44 @@ contract PGatewayTest is Test, TestConstants {
         gateway.initialize(address(accessManager), address(settings));
         console.log("PGateway initialized");
         
-        // Setup roles
+        // Grant roles as owner (who has DEFAULT_ADMIN_ROLE from constructor)
         vm.startPrank(owner);
+        console.log("Granting AGGREGATOR_ROLE to:", aggregator);
         accessManager.grantRole(accessManager.AGGREGATOR_ROLE(), aggregator);
+        console.log("Granting PROVIDER_ROLE to:", provider);
         accessManager.grantRole(accessManager.PROVIDER_ROLE(), provider);
+        
+        // Setup supported token
+        console.log("Setting supported token");
+        settings.setSupportedToken(address(testToken), true);
         vm.stopPrank();
         
-        // Setup tokens
-        vm.prank(owner);
-        settings.setSupportedToken(address(testToken), true);
+        // Mint tokens to user
         testToken.mint(user, TEST_AMOUNT * 10);
+        console.log("Minted tokens to user");
         
-        // Setup integrator
+        // Register integrator
+        console.log("Registering integrator");
         vm.prank(integrator);
         gateway.registerAsIntegrator(INTEGRATOR_FEE, "TestIntegrator");
         
-        console.log("Test setup completed");
+        console.log("Test setup completed successfully");
     }
     
-    function test_Initialization() public view {
+    function test_Initialization() public {
         console.log("Testing contract initialization...");
         assertEq(address(gateway.accessManager()), address(accessManager));
         assertEq(address(gateway.settings()), address(settings));
+        
+        // Verify roles are properly set
+        console.log("Verifying roles:");
+        console.log("- Provider has PROVIDER_ROLE:", accessManager.hasRole(accessManager.PROVIDER_ROLE(), provider));
+        console.log("- Aggregator has AGGREGATOR_ROLE:", accessManager.hasRole(accessManager.AGGREGATOR_ROLE(), aggregator));
+        console.log("- Owner has DEFAULT_ADMIN_ROLE:", accessManager.hasRole(accessManager.DEFAULT_ADMIN_ROLE(), owner));
+        
+        assertTrue(accessManager.hasRole(accessManager.PROVIDER_ROLE(), provider), "Provider should have role");
+        assertTrue(accessManager.hasRole(accessManager.AGGREGATOR_ROLE(), aggregator), "Aggregator should have role");
+        
         console.log("Contract initialization test passed");
     }
     

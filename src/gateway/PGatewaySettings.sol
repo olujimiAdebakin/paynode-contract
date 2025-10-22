@@ -190,7 +190,7 @@ contract PGatewaySettings is Initializable, OwnableUpgradeable, IErrors{
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
-        // _disableInitializers();
+        _disableInitializers();
     }
 
     /**
