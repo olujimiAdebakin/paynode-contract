@@ -150,6 +150,7 @@ contract PGatewaySettings is Initializable, OwnableUpgradeable, IErrors{
 
     // Configuration Variables
     uint64 public protocolFeePercent;
+    uint64 public maxProtocolFeePercent;
     uint256 public orderExpiryWindow;
     uint256 public proposalTimeout;
     address public treasuryAddress;
@@ -174,11 +175,13 @@ contract PGatewaySettings is Initializable, OwnableUpgradeable, IErrors{
         address treasury,
         address aggregator,
         uint64 fee,
+        uint64 maxFee,
         uint256 expiry,
         uint256 timeout,
         uint256 intentExpiry
     );
     event ProtocolFeeUpdated(uint64 newFee);
+    event MaxProtocolFeeUpdated(uint64 newMaxFee);
     event TierLimitsUpdated(
         uint256 alphaLimit, uint256 betaLimit, uint256 deltaLimit, uint256 omegaLimit, uint256 titanLimit
     );
@@ -188,10 +191,10 @@ contract PGatewaySettings is Initializable, OwnableUpgradeable, IErrors{
     event OrderExpiryWindowUpdated(uint256 newWindow);
     event ProposalTimeoutUpdated(uint256 newTimeout);
 
-    /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor() {
-        _disableInitializers();
-    }
+    // /// @custom:oz-upgrades-unsafe-allow constructor
+    // constructor() {
+    //     _disableInitializers();
+    // }
 
     /**
      * @notice Initializes the settings contract with protocol parameters
@@ -254,6 +257,7 @@ contract PGatewaySettings is Initializable, OwnableUpgradeable, IErrors{
         treasuryAddress = params.treasury;
         aggregatorAddress = params.aggregator;
         protocolFeePercent = params.protocolFee;
+        maxProtocolFeePercent = params.maxProtocolFee;
         integratorAddress = params.integrator;
         ALPHA_TIER_LIMIT = params.alphaLimit;
         BETA_TIER_LIMIT = params.betaLimit;
@@ -269,6 +273,7 @@ contract PGatewaySettings is Initializable, OwnableUpgradeable, IErrors{
             params.treasury,
             params.aggregator,
             params.protocolFee,
+            params.maxProtocolFee,
             params.orderExpiryWindow,
             params.proposalTimeout,
             params.intentExpiry
@@ -289,7 +294,7 @@ contract PGatewaySettings is Initializable, OwnableUpgradeable, IErrors{
      * - New fee must not exceed 5% (500 basis points)
      */
     function setProtocolFee(uint64 _newFee) external onlyOwner {
-        if (_newFee > 500) revert InvalidFee(); // Max 5%
+        if (_newFee > 5000) revert InvalidFee(); // Max 5%
         protocolFeePercent = _newFee;
         emit ProtocolFeeUpdated(_newFee);
     }
@@ -334,6 +339,25 @@ contract PGatewaySettings is Initializable, OwnableUpgradeable, IErrors{
     }
 
     /**
+     * @notice Updates the maximum protocol fee percentage
+     * @dev Sets the upper bound for protocol fee adjustments.
+     *      Prevents excessive fee increases and protects users from unfair charges.
+     * 
+     * @param _newMaxFee The new maximum protocol fee in basis points
+     * 
+     * @dev Emits {MaxProtocolFeeUpdated} event
+     * 
+     * Requirements:
+     * - Caller must be contract owner
+     * - New max fee must not exceed 10000 (100%)
+     */
+    function setMaxProtocolFee(uint64 _newMaxFee) external onlyOwner {
+        if (_newMaxFee > MAX_BPS) revert InvalidFee();
+        maxProtocolFeePercent = _newMaxFee;
+        emit MaxProtocolFeeUpdated(_newMaxFee);
+    }
+
+    /**
      * @notice Sets the order expiry window duration
      * @dev Defines how long orders remain valid before automatic refund.
      *      This protects users from stuck funds and ensures system liquidity.
@@ -348,6 +372,7 @@ contract PGatewaySettings is Initializable, OwnableUpgradeable, IErrors{
      */
     function setOrderExpiryWindow(uint256 _newWindow) external onlyOwner {
         if (_newWindow == 0) revert InvalidDuration();
+        if (_newWindow < proposalTimeout) revert InvalidDuration();
         orderExpiryWindow = _newWindow;
         emit OrderExpiryWindowUpdated(_newWindow);
     }
@@ -367,6 +392,7 @@ contract PGatewaySettings is Initializable, OwnableUpgradeable, IErrors{
      */
     function setProposalTimeout(uint256 _newTimeout) external onlyOwner {
         if (_newTimeout == 0) revert InvalidDuration();
+        if (_newTimeout > orderExpiryWindow) revert InvalidDuration();
         proposalTimeout = _newTimeout;
         emit ProposalTimeoutUpdated(_newTimeout);
     }
@@ -427,6 +453,16 @@ contract PGatewaySettings is Initializable, OwnableUpgradeable, IErrors{
         if (_token == address(0)) revert InvalidAddress();
         supportedTokens[_token] = _supported;
         emit SupportedTokenUpdated(_token, _supported);
+    }
+
+    /**
+     * @notice Returns the maximum protocol fee percentage
+     * @dev Provides access to the upper bound for protocol fee adjustments.
+     * 
+     * @return uint64 The maximum protocol fee in basis points
+     */
+    function maxProtocolFee() external view returns (uint64) {
+        return maxProtocolFeePercent;
     }
 
     /**

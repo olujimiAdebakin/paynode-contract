@@ -81,6 +81,7 @@ struct IntegratorInfo {
  * @param treasury Address where protocol fees are accumulated.
  * @param aggregator Address of the on-chain rate or data aggregator (oracle or pricing source).
  * @param protocolFee Base protocol fee in basis points.
+ * @param maxProtocolFee Maximum allowed protocol fee in basis points.
  * @param alphaLimit System threshold parameter for alpha operations.
  * @param betaLimit System threshold parameter for beta operations.
  * @param deltaLimit System threshold parameter for delta operations.
@@ -97,6 +98,7 @@ struct InitiateGatewaySettingsParams {
     address treasury;
     address aggregator;
     uint64 protocolFee;
+    uint64 maxProtocolFee;
     uint256 alphaLimit;
     uint256 betaLimit;
     uint256 deltaLimit;
